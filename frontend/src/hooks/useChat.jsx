@@ -6,6 +6,7 @@ const ChatContext = createContext();
 
 export const ChatProvider = ({ children }) => {
   const [videoPolling, setVideoPolling] = useState(new Map()); // Track polling for each session
+  const [videoSyncState, setVideoSyncState] = useState(new Map()); // Track video sync state
   
   const chat = async (message, videoMode = false) => {
     setLoading(true);
@@ -25,10 +26,19 @@ export const ChatProvider = ({ children }) => {
     const response = await data.json();
     const resp = response.messages;
     
+    console.log("📨 Chat response received:", {
+      videoMode,
+      messageCount: resp.length,
+      firstMessage: resp[0],
+      hasAudio: resp[0]?.audio ? `${resp[0].audio.length} chars` : 'none',
+      hasLipsync: resp[0]?.lipsync ? 'yes' : 'none',
+      animationTimeline: resp[0]?.animationTimeline || 'none'
+    });
+    
     // Process bot response and add to chat history immediately
     if (videoMode && resp.length > 0) {
       // Combine all text messages for immediate display
-      const combinedText = resp.map(msg => msg.text).join(' ');
+      const combinedText = resp.map(msg => msg.text || msg.chatResponse).join(' ');
       
       // Add chat entry with combined text immediately (no video yet)
       const chatEntry = { 
@@ -36,10 +46,20 @@ export const ChatProvider = ({ children }) => {
         text: combinedText,
         sessionId: sessionId,
         videoGenerating: true,
-        videoUrl: null
+        videoUrl: null,
+        videoExplanation: resp.map(msg => msg.videoExplanation || msg.text).join(' ') // Store explanation for avatar sync
       };
       
       setChatHistory(prev => [...prev, chatEntry]);
+      
+      // Also add enhanced messages to the avatar message queue with session info
+      const enhancedMessages = resp.map(msg => ({
+        ...msg,
+        sessionId: sessionId,
+        videoExplanation: msg.videoExplanation || msg.text
+      }));
+      
+      setMessages((messages) => [...messages, ...enhancedMessages]);
       
       // Start polling for video if in video mode
       if (response.videoGenerating) {
@@ -47,16 +67,28 @@ export const ChatProvider = ({ children }) => {
       }
     } else {
       // Regular chat mode - add each message separately
-      resp.forEach(msg => {
+      resp.forEach((msg, index) => {
+        console.log(`💬 Adding chat message ${index}:`, {
+          text: msg.text,
+          hasAudio: msg.audio ? `${msg.audio.length} chars` : 'none',
+          hasLipsync: msg.lipsync ? 'yes' : 'none',
+          animation: msg.animation,
+          facialExpression: msg.facialExpression,
+          animationTimeline: msg.animationTimeline || 'none'
+        });
+        
         setChatHistory(prev => [...prev, { 
           type: 'assistant', 
-          text: msg,
+          text: msg.text || msg.chatResponse,
           videoUrl: msg.videoUrl 
         }]);
       });
+      
+      // Add messages to avatar queue for speaking/animation
+      console.log("🎭 Adding messages to avatar queue:", resp.length, "messages");
+      setMessages((messages) => [...messages, ...resp]);
     }
     
-    setMessages((messages) => [...messages, ...resp]);
     setLoading(false);
   };
   
@@ -77,6 +109,16 @@ export const ChatProvider = ({ children }) => {
               ? { ...msg, videoUrl: videoData.videoUrl, videoGenerating: false }
               : msg
           ));
+          
+          // Initialize video sync state for this session
+          setVideoSyncState(prev => new Map(prev).set(sessionId, {
+            videoReady: true,
+            isPlaying: false,
+            currentTime: 0,
+            audioContext: null,
+            audioBuffer: null,
+            audioSource: null
+          }));
           
           // Clear the polling interval
           clearInterval(pollInterval);
@@ -105,6 +147,63 @@ export const ChatProvider = ({ children }) => {
       console.log(`⏰ Video polling timeout for session ${sessionId}`);
     }, 300000); // 5 minutes
   };
+
+  // Avatar speech synchronization functions
+  const handleVideoPlay = (sessionId) => {
+    console.log(`🎵 Video started playing for session: ${sessionId}`);
+    setVideoSyncState(prev => {
+      const newMap = new Map(prev);
+      const syncState = newMap.get(sessionId);
+      if (syncState) {
+        newMap.set(sessionId, { ...syncState, isPlaying: true });
+      }
+      return newMap;
+    });
+  };
+
+  const handleVideoPause = (sessionId) => {
+    console.log(`⏸️ Video paused for session: ${sessionId}`);
+    setVideoSyncState(prev => {
+      const newMap = new Map(prev);
+      const syncState = newMap.get(sessionId);
+      if (syncState) {
+        newMap.set(sessionId, { ...syncState, isPlaying: false });
+      }
+      return newMap;
+    });
+  };
+
+  const handleVideoSeek = (sessionId, time) => {
+    console.log(`⏭️ Video seeked to ${time}s for session: ${sessionId}`);
+    setVideoSyncState(prev => {
+      const newMap = new Map(prev);
+      const syncState = newMap.get(sessionId);
+      if (syncState) {
+        newMap.set(sessionId, { 
+          ...syncState, 
+          currentTime: time,
+          lastUpdateTime: Date.now() // Track when this update occurred
+        });
+      }
+      return newMap;
+    });
+  };
+
+  const handleVideoEnd = (sessionId) => {
+    console.log(`🔚 Video ended for session: ${sessionId}`);
+    setVideoSyncState(prev => {
+      const newMap = new Map(prev);
+      const syncState = newMap.get(sessionId);
+      if (syncState) {
+        newMap.set(sessionId, { ...syncState, isPlaying: false, currentTime: 0 });
+      }
+      return newMap;
+    });
+  };
+
+  const getVideoSyncState = (sessionId) => {
+    return videoSyncState.get(sessionId) || null;
+  };
   const [messages, setMessages] = useState([]);
   const [message, setMessage] = useState();
   const [loading, setLoading] = useState(false);
@@ -131,7 +230,12 @@ export const ChatProvider = ({ children }) => {
         loading,
         cameraZoomed,
         setCameraZoomed,
-        chatHistory
+        chatHistory,
+        handleVideoPlay,
+        handleVideoPause,
+        handleVideoSeek,
+        handleVideoEnd,
+        getVideoSyncState
       }}
     >
       {children}

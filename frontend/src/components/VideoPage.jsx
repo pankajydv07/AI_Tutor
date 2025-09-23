@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import { FullVideoPlayer } from './FullVideoPlayer';
 
-export const VideoPage = ({ videoUrl, onClose }) => {
+export const VideoPage = ({ videoUrl, sessionId, onClose }) => {
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -13,7 +13,7 @@ export const VideoPage = ({ videoUrl, onClose }) => {
         {/* Video Player */}
         <div className="flex-grow">
           {videoUrl ? (
-            <FullVideoPlayer src={videoUrl} onClose={onClose} />
+            <FullVideoPlayer src={videoUrl} sessionId={sessionId} onClose={onClose} />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-gray-400 text-lg">
               No video selected
