@@ -27,10 +27,7 @@ export const UI = ({ hidden, showControls = true, showChat = true, ...props }) =
         const transcript = event.results[0][0].transcript;
         input.current.value = transcript;
         setIsListening(false);
-        if (transcript && !loading && !message) {
-          chat(transcript, isVideoMode);
-          input.current.value = "";
-        }
+        // Don't auto-send, let user choose Text Only or Create Video
       };
 
       recognition.current.onerror = (event) => {
