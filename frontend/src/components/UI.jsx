@@ -1,6 +1,8 @@
 import { useRef, useState } from "react";
 import { useChat } from "../hooks/useChat";
 import { motion, AnimatePresence } from "framer-motion";
+import { InlineVideoPlayer } from './InlineVideoPlayer';
+import { VideoPage } from './VideoPage';
 
 export const UI = ({ hidden, showControls = true, showChat = true, ...props }) => {
   const input = useRef();
@@ -8,6 +10,7 @@ export const UI = ({ hidden, showControls = true, showChat = true, ...props }) =
   const [isListening, setIsListening] = useState(false);
   const [isVideoMode, setIsVideoMode] = useState(false); // Default to Chat mode
   const [willCreateVideo, setWillCreateVideo] = useState(false); // Toggle for video creation
+  const [expandedVideo, setExpandedVideo] = useState(null);
   const recognition = useRef(null);
 
   // Initialize Web Speech API
@@ -45,9 +48,19 @@ export const UI = ({ hidden, showControls = true, showChat = true, ...props }) =
   const sendMessage = () => {
     const text = input.current.value;
     if (!loading && !message && text.trim()) {
-      chat(text, isVideoMode);
+      chat(text, willCreateVideo);
       input.current.value = "";
     }
+  };
+
+  const handleVideoExpand = (videoUrl) => {
+    setExpandedVideo(videoUrl);
+    setIsVideoMode(true);
+  };
+
+  const handleVideoClose = () => {
+    setExpandedVideo(null);
+    setIsVideoMode(false);
   };
 
   const toggleMic = () => {
@@ -91,7 +104,12 @@ export const UI = ({ hidden, showControls = true, showChat = true, ...props }) =
       {showChat && (
         <div className="h-full flex flex-col relative">
           <motion.button
-            onClick={() => setIsVideoMode(!isVideoMode)}
+            onClick={() => {
+              setIsVideoMode(!isVideoMode);
+              if (!isVideoMode) {
+                setExpandedVideo(null);
+              }
+            }}
             className="absolute left-[40%] -translate-x-1/2 top-6 z-50 bg-black/95 text-white px-8 py-3 rounded-full backdrop-blur-xl shadow-[0_0_15px_rgba(255,255,255,0.15)] border-2 border-white/10 hover:border-white/30 transition-all duration-500 before:absolute before:inset-0 before:-z-10 before:rounded-full before:bg-gradient-to-r before:from-[#ff00ea]/20 before:via-[#2600ff]/20 before:to-[#00ffeb]/20 before:blur-xl before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-500"
             style={{
               boxShadow: "0 0 15px rgba(255,255,255,0.15), inset 0 0 20px rgba(255,255,255,0.05), 0 0 2px rgba(255,255,255,0.2)"
@@ -199,9 +217,22 @@ export const UI = ({ hidden, showControls = true, showChat = true, ...props }) =
               </motion.div>
             </AnimatePresence>
           </motion.button>
-            <div className="flex-1 bg-gray-900/95 backdrop-blur-lg p-6 mb-4 overflow-y-auto">
-              <div className="flex flex-col space-y-4">
-              {chatHistory.map((msg, index) => (
+          <AnimatePresence mode="wait">
+            {isVideoMode ? (
+              <VideoPage
+                videoUrl={expandedVideo}
+                onClose={handleVideoClose}
+              />
+            ) : (
+              <motion.div
+                key="chat"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="flex-1 bg-gray-900/95 backdrop-blur-lg p-6 mb-4 overflow-y-auto"
+              >
+                <div className="flex flex-col space-y-4">
+                {chatHistory.map((msg, index) => (
                 <div
                   key={index}
                   className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}
@@ -233,47 +264,45 @@ export const UI = ({ hidden, showControls = true, showChat = true, ...props }) =
                       </div>
                     )}
                     
-                    {/* Show combined video if available */}
-                    {msg.type === 'assistant' && msg.videoUrl && !msg.videoGenerating && (
-                      <div className="mt-3">
-                        <video 
-                          controls 
-                          className="w-full max-w-md rounded-lg"
-                          poster="/api/placeholder/400/225"
-                        >
-                          <source src={msg.videoUrl} type="video/mp4" />
-                          Your browser does not support the video tag.
-                        </video>
-                        <p className="text-xs text-gray-400 mt-1">📹 Educational Video</p>
+                                {/* Show video if available */}
+                        {msg.type === 'assistant' && msg.videoUrl && !msg.videoGenerating && (
+                          <div className="mt-3">
+                            <InlineVideoPlayer
+                              src={msg.videoUrl}
+                              onExpand={() => handleVideoExpand(msg.videoUrl)}
+                            />
+                            <p className="text-xs text-gray-400 mt-1">📹 Educational Video</p>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
+                    </div>
+                  ))}
+                  {loading && (
+                    <div className="flex justify-start">
+                      <div className="bg-gray-800/80 text-gray-100 px-4 py-3 rounded-2xl rounded-tl-sm">
+                        {isVideoMode ? (
+                          <div>
+                            <div className="flex space-x-2 mb-2">
+                              <div className="w-2 h-2 bg-pink-400 rounded-full animate-pulse"></div>
+                              <div className="w-2 h-2 bg-pink-400 rounded-full animate-pulse delay-75"></div>
+                              <div className="w-2 h-2 bg-pink-400 rounded-full animate-pulse delay-150"></div>
+                            </div>
+                            <p className="text-xs text-gray-400">🎬 Generating educational video...</p>
+                          </div>
+                        ) : (
+                          <div className="flex space-x-2">
+                            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-75"></div>
+                            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-150"></div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              ))}
-              {loading && (
-                <div className="flex justify-start">
-                  <div className="bg-gray-800/80 text-gray-100 px-4 py-3 rounded-2xl rounded-tl-sm">
-                    {isVideoMode ? (
-                      <div>
-                        <div className="flex space-x-2 mb-2">
-                          <div className="w-2 h-2 bg-pink-400 rounded-full animate-pulse"></div>
-                          <div className="w-2 h-2 bg-pink-400 rounded-full animate-pulse delay-75"></div>
-                          <div className="w-2 h-2 bg-pink-400 rounded-full animate-pulse delay-150"></div>
-                        </div>
-                        <p className="text-xs text-gray-400">🎬 Generating educational video...</p>
-                      </div>
-                    ) : (
-                      <div className="flex space-x-2">
-                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-75"></div>
-                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-150"></div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Input Area */}
           <div className="flex gap-3 items-center bg-gray-900/80 p-4 rounded-2xl backdrop-blur-lg">
