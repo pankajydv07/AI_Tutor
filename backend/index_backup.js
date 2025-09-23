@@ -33,7 +33,7 @@ app.use(cors());
 const port = 3000;
 
 app.get("/", (req, res) => {
-  res.send("Virtual Girlfriend API");
+  res.send("Virtual Tutor API");
 });
 
 app.get("/voices", async (req, res) => {
@@ -305,5 +305,5 @@ const audioFileToBase64 = async (file) => {
 };
 
 app.listen(port, () => {
-  console.log(`Virtual Girlfriend listening on port ${port}`);
+  console.log(`Virtual Tutor listening on port ${port}`);
 });

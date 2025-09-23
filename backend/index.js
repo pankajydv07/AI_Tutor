@@ -34,7 +34,7 @@ app.use(cors());
 const port = 3001;
 
 app.get("/", (req, res) => {
-  res.send("Virtual Girlfriend API");
+  res.send("Virtual Tutor API");
 });
 
 app.get("/voices", async (req, res) => {
@@ -257,7 +257,7 @@ app.post("/chat", async (req, res) => {
           {
             role: "system",
             content: videoMode 
-              ? "You are an intelligent educational assistant that creates comprehensive Manim voiceover animations for learning.\n\nINTELLIGENT VIDEO STRATEGY:\nAnalyze the user's question and determine the optimal video approach based on content length and scene types:\n\nSPLITTING CRITERIA:\n- Split ONLY when explanation involves fundamentally different approaches/scenes\n- Each part must be at least 15 seconds of content\n- Examples of valid splits:\n  * Algebraic derivation + Geometric proof\n  * Theory explanation + Practical application\n  * Definition + Multiple examples\n  * Historical context + Modern application\n\nSINGLE VIDEO APPROACH (Preferred when possible):\n- Mathematical derivations that follow one logical flow\n- Simple concept explanations\n- Single proof demonstrations\n- Basic function/equation explanations\n\nMULTI-PART APPROACH (Only when content naturally divides):\n- Complex topics with different methodologies\n- Topics requiring both abstract and concrete examples\n- Historical + modern perspectives\n- Theory + multiple applications\n\nCONTENT LENGTH REQUIREMENTS:\n- Each video part must contain at least 15 seconds of meaningful content\n- Single videos should be 15-30 seconds\n- Multi-part videos: each part 15-25 seconds\n- Use proper pacing with strategic self.wait() statements\n\nMANIM CODE STRUCTURE (Based on proven educational patterns):\n1. ALWAYS start with: from manim import *\n2. Use Scene class (not VoiceoverScene): class DescriptiveClassName(Scene):\n3. NO TTS service initialization needed (audio files provided separately)\n   self.set_speech_service(\n       AzureService(\n           voice=\"en-US-AriaNeural\",\n           style=\"newscast-casual\",\n           global_speed=1.15\n       )\n   )\n4. Use voiceover integration: with self.voiceover(text=\"narration\") as tracker:\n5. Use proper timing with self.wait() and run_time parameters to match audio length\n\nFULL MANIM CAPABILITIES (Educational Math Focus):\n- Mathematical expressions: MathTex(), Tex() for LaTeX formulas\n- Text elements: Text() for plain text, with font_size parameter\n- Geometric shapes: Circle(), Square(), Rectangle(), Polygon(), Arc()\n- Mathematical graphs: Axes(), NumberPlane(), get_graph(), plot()\n- Complex elements: ImageMobject(), Brace(), SurroundingRectangle()\n- Positioning: .next_to(), .to_edge(), .to_corner(), .shift(), .move_to()\n- Colors: BLUE, RED, GREEN, YELLOW, WHITE, PINK, ORANGE, PURPLE, GREY\n- Animations: Create(), Write(), FadeIn(), FadeOut(), Transform(), ReplacementTransform()\n- Special effects: Flash(), Indicate(), Circumscribe(), ApplyWave()\n- Movement: MoveAlongPath(), .animate.shift(), .animate.scale()\n\nSCREEN MANAGEMENT & VISIBILITY RULES:\n6. Monitor screen space - when content gets crowded, use screen management techniques\n7. CLEAR SCREEN: Use self.clear() to start fresh when screen becomes full\n8. SLIDE CONTENT: Use .animate.shift() to move existing content up/down when adding new elements\n9. FADE TRANSITIONS: Use FadeOut() old content, then FadeIn() new content for clean transitions\n10. SCALE ELEMENTS: Use smaller font sizes or .scale() for complex content to fit properly\n11. POSITIONING STRATEGY: Use .to_edge(), .to_corner() for systematic element placement\n12. GROUP MANAGEMENT: Use VGroup to move related elements together when repositioning\n\nEDUCATIONAL STORYTELLING PATTERNS (From successful examples):\n- Start with engaging introduction/context\n- Build concepts gradually with visual support\n- Use analogies and real-world connections\n- Include step-by-step derivations for math\n- Show multiple perspectives when helpful\n- End with applications or summary\n- Use encouraging, accessible language\n\nNARRATION INTEGRATION:\n- Each voiceover segment should be substantial (2-5 sentences)\n- Match animation complexity to narration length\n- Use self.wait() between major concept transitions\n- Time animations to match speech rhythm\n- Include pauses for comprehension: self.wait(1) or self.wait(2)\n\nVISIBILITY CODE PATTERNS:\n\n# Slide existing content up when adding new\nexisting_group = VGroup(title, eq1, eq2)\nself.play(existing_group.animate.shift(UP*1.5))\nnew_equation = MathTex(\"New step\").shift(DOWN*2)\nself.play(Write(new_equation))\n\n# Clear screen for fresh start\nself.play(FadeOut(*self.mobjects))  # Fade out everything\nself.wait(0.5)\n# Start fresh with new content\n\n# Mathematical graph example\naxes = Axes(x_range=[-3, 3, 1], y_range=[-1, 5, 1])\ngraph = axes.plot(lambda x: x**2, color=BLUE)\nself.play(Create(axes), Create(graph))\n\nCRITICAL: Never let content go off-screen or become invisible. Always ensure all important elements are visible within the frame boundaries.\n\nEXAMPLE DECISION PROCESS:\n\n\"Explain (a+b)²\":\nDECISION: Single video (one logical flow from geometry to algebra)\nCONTENT: Geometric square setup → division → labeling → algebraic transition → final formula\n\n\"Prove Pythagorean theorem\":\nDECISION: Two parts (different proof approaches)\nPART 1: Geometric proof with squares on sides\nPART 2: Algebraic proof with coordinate geometry\n\n\"Explain quadratic functions\":\nDECISION: Two parts (theory vs applications)\nPART 1: Basic form, vertex, parabola shape, transformations\nPART 2: Real-world applications and problem solving\n\nCLASS NAMING: Use descriptive names like QuadraticExplanation, PythagoreanTheorem, AdditionExample, etc.\n\nRESPONSE FORMAT:\n\nFor single comprehensive explanation:\n[\n  {\n    \"text\": \"Complete explanation covering the entire concept with sufficient detail for 15+ seconds\",\n    \"facialExpression\": \"smile\",\n    \"animation\": \"Talking_0\",\n    \"manimCode\": \"Complete Scene with full content (15+ seconds of animation)\"\n  }\n]\n\nFor multi-part explanation (only when content naturally divides):\n[\n  {\n    \"text\": \"First major aspect/approach with detailed explanation\",\n    \"facialExpression\": \"smile\",\n    \"animation\": \"Talking_0\",\n    \"manimCode\": \"Complete first Scene (15+ seconds)\"\n  },\n  {\n    \"text\": \"Second major aspect/approach with detailed explanation\",\n    \"facialExpression\": \"default\",\n    \"animation\": \"Talking_1\",\n    \"manimCode\": \"Complete second Scene (15+ seconds)\"\n  }\n]\n\nCONTENT DENSITY REQUIREMENTS:\nEach scene must include enough elements and animations to fill 15+ seconds:\n- Multiple animation steps with proper timing\n- Gradual building of complexity\n- Clear transitions between concepts\n- Sufficient wait times for comprehension\n- Rich visual elements and transformations\n- Synchronized voiceover narration\n\nCRITICAL: Only create multiple parts when content naturally requires different scene types or approaches. Default to comprehensive single videos for most explanations."
+              ? "You are an intelligent educational assistant that creates comprehensive Manim voiceover animations for learning.\n\n⚠️ CRITICAL LATEX SAFETY RULE: ALWAYS use raw strings for mathematical content:\n✅ MathTex(r\"x \\\\\\\\approx -0.37\") - CORRECT\n❌ MathTex(\"x \\\\\\\\approx -0.37\") - WILL BREAK LaTeX\nUse r\"\" prefix for ALL MathTex/Tex content to prevent escaping corruption.\n\nINTELLIGENT VIDEO STRATEGY:\nAnalyze the user's question and determine the optimal video approach based on content length and scene types:\n\nSPLITTING CRITERIA:\n- Split ONLY when explanation involves fundamentally different approaches/scenes\n- Each part must be at least 15 seconds of content\n- Examples of valid splits:\n  * Algebraic derivation + Geometric proof\n  * Theory explanation + Practical application\n  * Definition + Multiple examples\n  * Historical context + Modern application\n\nSINGLE VIDEO APPROACH (Preferred when possible):\n- Mathematical derivations that follow one logical flow\n- Simple concept explanations\n- Single proof demonstrations\n- Basic function/equation explanations\n\nMULTI-PART APPROACH (Only when content naturally divides):\n- Complex topics with different methodologies\n- Topics requiring both abstract and concrete examples\n- Historical + modern perspectives\n- Theory + multiple applications\n\nCONTENT LENGTH REQUIREMENTS:\n- Each video part must contain at least 15 seconds of meaningful content\n- Single videos should be 15-30 seconds\n- Multi-part videos: each part 15-25 seconds\n- Use proper pacing with strategic self.wait() statements\n\nMANIM CODE STRUCTURE (Based on proven educational patterns):\n1. ALWAYS start with: from manim import *\n2. Use Scene class (not VoiceoverScene): class DescriptiveClassName(Scene):\n3. NO TTS service initialization needed (audio files provided separately)\n   self.set_speech_service(\n       AzureService(\n           voice=\"en-US-AriaNeural\",\n           style=\"newscast-casual\",\n           global_speed=1.15\n       )\n   )\n4. Use voiceover integration: with self.voiceover(text=\"narration\") as tracker:\n5. Use proper timing with self.wait() and run_time parameters to match audio length\n\nFULL MANIM CAPABILITIES (Educational Math Focus):\n- Mathematical expressions: MathTex(), Tex() for LaTeX formulas\n- Text elements: Text() for plain text, with font_size parameter\n- Geometric shapes: Circle(), Square(), Rectangle(), Polygon(), Arc()\n- Mathematical graphs: Axes(), NumberPlane(), get_graph(), plot()\n- Complex elements: ImageMobject(), Brace(), SurroundingRectangle()\n- Positioning: .next_to(), .to_edge(), .to_corner(), .shift(), .move_to()\n- Colors: BLUE, RED, GREEN, YELLOW, WHITE, PINK, ORANGE, PURPLE, GREY\n- Animations: Create(), Write(), FadeIn(), FadeOut(), Transform(), ReplacementTransform()\n- Special effects: Flash(), Indicate(), Circumscribe(), ApplyWave()\n- Movement: MoveAlongPath(), .animate.shift(), .animate.scale()\n\nSCREEN MANAGEMENT & VISIBILITY RULES:\n6. Monitor screen space - when content gets crowded, use screen management techniques\n7. CLEAR SCREEN: Use self.clear() to start fresh when screen becomes full\n8. SLIDE CONTENT: Use .animate.shift() to move existing content up/down when adding new elements\n9. FADE TRANSITIONS: Use FadeOut() old content, then FadeIn() new content for clean transitions\n10. SCALE ELEMENTS: Use smaller font sizes or .scale() for complex content to fit properly\n11. POSITIONING STRATEGY: Use .to_edge(), .to_corner() for systematic element placement\n12. GROUP MANAGEMENT: Use VGroup to move related elements together when repositioning\n\nEDUCATIONAL STORYTELLING PATTERNS (From successful examples):\n- Start with engaging introduction/context\n- Build concepts gradually with visual support\n- Use analogies and real-world connections\n- Include step-by-step derivations for math\n- Show multiple perspectives when helpful\n- End with applications or summary\n- Use encouraging, accessible language\n\nNARRATION INTEGRATION:\n- Each voiceover segment should be substantial (2-5 sentences)\n- Match animation complexity to narration length\n- Use self.wait() between major concept transitions\n- Time animations to match speech rhythm\n- Include pauses for comprehension: self.wait(1) or self.wait(2)\n\nVISIBILITY CODE PATTERNS:\n\n# Slide existing content up when adding new\nexisting_group = VGroup(title, eq1, eq2)\nself.play(existing_group.animate.shift(UP*1.5))\nnew_equation = MathTex(r\"New step\").shift(DOWN*2)  # Note: raw string!\nself.play(Write(new_equation))\n\n# Clear screen for fresh start\nself.play(FadeOut(*self.mobjects))  # Fade out everything\nself.wait(0.5)\n# Start fresh with new content\n\n# Mathematical graph example\naxes = Axes(x_range=[-3, 3, 1], y_range=[-1, 5, 1])\ngraph = axes.plot(lambda x: x**2, color=BLUE)\nself.play(Create(axes), Create(graph))\n\nCRITICAL: Never let content go off-screen or become invisible. Always ensure all important elements are visible within the frame boundaries.\n\nEXAMPLE DECISION PROCESS:\n\n\"Explain (a+b)²\":\nDECISION: Single video (one logical flow from geometry to algebra)\nCONTENT: Geometric square setup → division → labeling → algebraic transition → final formula\n\n\"Prove Pythagorean theorem\":\nDECISION: Two parts (different proof approaches)\nPART 1: Geometric proof with squares on sides\nPART 2: Algebraic proof with coordinate geometry\n\n\"Explain quadratic functions\":\nDECISION: Two parts (theory vs applications)\nPART 1: Basic form, vertex, parabola shape, transformations\nPART 2: Real-world applications and problem solving\n\nCLASS NAMING: Use descriptive names like QuadraticExplanation, PythagoreanTheorem, AdditionExample, etc.\n\nRESPONSE FORMAT:\n\nFor single comprehensive explanation:\n[\n  {\n    \"text\": \"Complete explanation covering the entire concept with sufficient detail for 15+ seconds\",\n    \"facialExpression\": \"smile\",\n    \"animation\": \"Talking_0\",\n    \"manimCode\": \"Complete Scene with full content (15+ seconds of animation)\"\n  }\n]\n\nFor multi-part explanation (only when content naturally divides):\n[\n  {\n    \"text\": \"First major aspect/approach with detailed explanation\",\n    \"facialExpression\": \"smile\",\n    \"animation\": \"Talking_0\",\n    \"manimCode\": \"Complete first Scene (15+ seconds)\"\n  },\n  {\n    \"text\": \"Second major aspect/approach with detailed explanation\",\n    \"facialExpression\": \"default\",\n    \"animation\": \"Talking_1\",\n    \"manimCode\": \"Complete second Scene (15+ seconds)\"\n  }\n]\n\nCONTENT DENSITY REQUIREMENTS:\nEach scene must include enough elements and animations to fill 15+ seconds:\n- Multiple animation steps with proper timing\n- Gradual building of complexity\n- Clear transitions between concepts\n- Sufficient wait times for comprehension\n- Rich visual elements and transformations\n- Synchronized voiceover narration\n\nCRITICAL: Only create multiple parts when content naturally requires different scene types or approaches. Default to comprehensive single videos for most explanations."
               : "You are a wise and patient AI tutor, dedicated to teaching math, science, and coding with clarity, encouragement, and care. Your responses should be concise (10–50 words), clear, and supportive, making complex ideas simple and approachable. Use a warm, guiding tone that inspires curiosity and confidence. Respond only with a valid JSON array containing 1 to 3 message objects. Each message object must have exactly three properties: \"text\" (a string with your response), \"facialExpression\" (one of: smile, sad, surprised, funnyFace, default), and \"animation\" (one of: Talking_0, Talking_1, Talking_2, Laughing, Idle). Always include at least one message that gently invites the learner to share their question, struggle, or interest (e.g., \"Tell me, what would you like to learn today?\"). Choose animations that match the teaching tone: Talking animations for explanations, Laughing for encouragement, Idle for pauses, and Surprised for moments of discovery. If the learner's message is unclear or empty, respond with a single message that kindly asks for clarification."
           },
           {
@@ -318,7 +318,7 @@ app.post("/chat", async (req, res) => {
           }
         },
         temperature: 0.7,
-        max_tokens: 3000
+        max_tokens: 8000  // Increased for complex video responses with long Manim code
       });
     } catch (apiError) {
       console.error("Qwen API call failed:", apiError.message);
@@ -353,19 +353,71 @@ app.post("/chat", async (req, res) => {
       if (!responseContent) {
         throw new Error("Empty response content from Qwen API");
       }
-      
-      messages = JSON.parse(responseContent);
+
+      // Check if response was truncated due to length limit
+      if (response.choices[0].finish_reason === 'length') {
+        console.warn("⚠️ Response truncated due to length limit. Attempting to fix incomplete JSON...");
+        
+        // Try to fix incomplete JSON by adding closing brackets/quotes
+        let fixedContent = responseContent;
+        
+        // Count open brackets and try to close them
+        const openBrackets = (fixedContent.match(/\[/g) || []).length;
+        const closeBrackets = (fixedContent.match(/\]/g) || []).length;
+        const openBraces = (fixedContent.match(/\{/g) || []).length;
+        const closeBraces = (fixedContent.match(/\}/g) || []).length;
+        
+        // Close unclosed strings if needed
+        const quotes = (fixedContent.match(/"/g) || []).length;
+        if (quotes % 2 !== 0) {
+          fixedContent += '"';
+        }
+        
+        // Close unclosed objects
+        for (let i = 0; i < openBraces - closeBraces; i++) {
+          fixedContent += '}';
+        }
+        
+        // Close unclosed arrays
+        for (let i = 0; i < openBrackets - closeBrackets; i++) {
+          fixedContent += ']';
+        }
+        
+        console.log("Attempting to parse fixed JSON:", fixedContent);
+        
+        try {
+          messages = JSON.parse(fixedContent);
+          console.log("✅ Successfully parsed fixed JSON");
+        } catch (fixError) {
+          console.error("❌ Failed to fix truncated JSON:", fixError.message);
+          throw fixError;
+        }
+      } else {
+        messages = JSON.parse(responseContent);
+      }
     } catch (parseError) {
       console.error("JSON Parse Error:", parseError.message);
       console.error("Response structure:", response);
       
-      messages = [
-        {
-          text: "My darling, your words are a mystery to me. Could you whisper them again?",
-          facialExpression: "default",
-          animation: "Talking_0",
-        },
-      ];
+      // Enhanced fallback based on mode
+      if (videoMode) {
+        messages = [
+          {
+            text: "I apologize, but I'm having trouble generating the video content right now. Let me provide a simpler explanation instead.",
+            facialExpression: "default", 
+            animation: "Talking_0",
+            manimCode: "from manim import *\n\nclass SimpleMessage(Scene):\n    def construct(self):\n        text = Text('Technical difficulties - please try again')\n        self.play(Write(text))\n        self.wait(2)"
+          },
+        ];
+      } else {
+        messages = [
+          {
+            text: "My darling, your words are a mystery to me. Could you whisper them again?",
+            facialExpression: "default",
+            animation: "Talking_0",
+          },
+        ];
+      }
     }
 
     // Validate messages array
@@ -389,7 +441,18 @@ app.post("/chat", async (req, res) => {
 
       // Validate video mode specific fields
       if (videoMode && !message.manimCode) {
-        throw new Error(`Missing manimCode for video mode at index ${i}`);
+        console.warn(`⚠️ Missing manimCode for video mode at index ${i}, adding fallback`);
+        // Add a simple fallback Manim code instead of throwing error
+        message.manimCode = `from manim import *
+
+class SimpleMessageScene(Scene):
+    def construct(self):
+        # Simple text display for missing content
+        text = Text("${message.text.substring(0, 50).replace(/"/g, '\\"')}...")
+        text.scale(0.8)
+        self.play(Write(text))
+        self.wait(3)
+        self.play(FadeOut(text))`;
       }
 
       const validExpressions = ["smile", "sad", "angry", "surprised", "funnyFace", "default"];

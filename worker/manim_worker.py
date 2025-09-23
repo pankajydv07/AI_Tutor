@@ -27,6 +27,10 @@ app = FastAPI(title="3D Avatar Manim Worker", version="1.0.0")
 OUTPUT_DIR = Path(__file__).parent.parent / "uploads" / "videos"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+# Debug settings - set to True to keep generated code files
+DEBUG_MODE = True  
+AUTO_FALLBACK_TO_TEXT = True  # Automatically replace LaTeX with Text when LaTeX unavailable
+
 class ManimRequest(BaseModel):
     manimCode: str
     messageId: str = None
@@ -56,8 +60,163 @@ FFMPEG_AVAILABLE = check_ffmpeg()
 if not FFMPEG_AVAILABLE:
     print("⚠️ FFmpeg not found. Videos will be generated without proper encoding.")
 
+def check_sox():
+    """Check if SoX is available"""
+    try:
+        subprocess.run(["sox", "--version"], 
+                      capture_output=True, check=True)
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
+def check_and_install_dependencies():
+    """Check for dependencies and install if missing"""
+    print("🔍 Checking dependencies...")
+    
+    # Check for SoX
+    sox_available = check_sox()
+    if not sox_available:
+        print("⚠️ SoX not found. Installing...")
+        try:
+            # Try to install SoX with pip first
+            subprocess.run([sys.executable, "-m", "pip", "install", "sox"], check=True)
+            print("✅ SoX installed via pip")
+        except subprocess.CalledProcessError:
+            # If pip install fails, try platform-specific methods
+            if os.name == "nt":  # Windows
+                print("⚠️ Installing SoX via chocolatey (may require admin)...")
+                try:
+                    subprocess.run(["choco", "install", "sox.portable", "-y"], check=True)
+                    print("✅ SoX installed via chocolatey")
+                except (subprocess.CalledProcessError, FileNotFoundError):
+                    print("❌ SoX installation failed. Please install manually from:")
+                    print("   http://sox.sourceforge.net/")
+            else:  # Linux/Mac
+                print("⚠️ Please install SoX using your package manager:")
+                print("   Linux: sudo apt-get install sox")
+                print("   Mac: brew install sox")
+    
+    print("✅ Dependency check completed")
+
 # Global progress tracking
 progress_tracker = {}
+
+def is_latex_available():
+    """Check if LaTeX is properly installed and working"""
+    latex_bin = shutil.which("latex") or shutil.which("xelatex")
+    if not latex_bin:
+        return False
+    
+    # Test with minimal LaTeX document
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        test_file = Path(tmp_dir) / "test.tex"
+        test_file.write_text(r"\documentclass{minimal}\begin{document}Test\end{document}")
+        try:
+            subprocess.run(
+                [latex_bin, "-interaction=nonstopmode", str(test_file)],
+                cwd=tmp_dir, timeout=5, capture_output=True
+            )
+            return True
+        except (subprocess.SubprocessError, OSError):
+            return False
+
+def analyze_manim_code(code):
+    """Analyze Manim code for potential issues"""
+    issues = []
+    
+    # Check for LaTeX-dependent objects
+    latex_objects = {
+        "MathTex": re.findall(r'MathTex\([^)]*\)', code),
+        "Tex": re.findall(r'Tex\([^)]*\)', code),
+        "TexTemplate": re.findall(r'TexTemplate', code),
+        "LaTeX": re.findall(r'LaTeX', code),
+    }
+    
+    latex_usage = sum(len(matches) for matches in latex_objects.values())
+    
+    if latex_usage > 0 and not is_latex_available():
+        issues.append({
+            "type": "latex_missing",
+            "count": latex_usage,
+            "details": {k: v for k, v in latex_objects.items() if v}
+        })
+    
+    return {
+        "latex_usage": latex_usage > 0,
+        "issues": issues
+    }
+
+def modify_code_for_latex_fallback(code):
+    """Modify code to use Text instead of MathTex when LaTeX is unavailable"""
+    def clean_latex_text(match):
+        text = match.group(1)
+        # Remove special LaTeX characters
+        text = text.replace("^", " pow ")
+        text = text.replace("{", "")
+        text = text.replace("}", "")
+        text = text.replace("\\\\", "")
+        text = text.replace("\\", "")
+        return f'Text("{text}")'
+    
+    # Replace MathTex with Text, removing special LaTeX characters
+    modified = re.sub(r'MathTex\(r?"([^"]+)"', clean_latex_text, code)
+    
+    # Replace single-argument Tex with Text
+    modified = re.sub(r'Tex\(r?"([^"]+)"', clean_latex_text, modified)
+    
+    # Add comment explaining the modification
+    modified = "# AUTO-MODIFIED: LaTeX objects replaced with Text due to missing LaTeX\n" + modified
+    
+    return modified
+
+def extract_latex_error(stderr_output):
+    """Extract useful LaTeX error information from stderr output"""
+    # Common LaTeX error patterns
+    latex_error_patterns = [
+        r'! LaTeX Error: (.*?)\n',
+        r'! Package (.*?) Error: (.*?)\n',
+        r'! Undefined control sequence.\n\\[^ ]* ',
+    ]
+    
+    for pattern in latex_error_patterns:
+        matches = re.findall(pattern, stderr_output)
+        if matches:
+            return str(matches[0])
+    
+    # If no specific error found, return a general message
+    if "LaTeX" in stderr_output and "error" in stderr_output.lower():
+        return "LaTeX processing failed. Please check your LaTeX syntax or install LaTeX."
+
+def fix_latex_escaping(manim_code):
+    """Fix common LaTeX escaping issues in Manim code - MINIMAL VERSION"""
+    
+    print(f"🔧 [DEBUG] Input code:\n{manim_code}")
+    
+    # ONLY fix the specific corrupted approx issue that we know about
+    # Don't touch other words that might be Python keywords
+    latex_fixes = {
+        r'pprox': r'\\approx',  # Fix the specific "pprox" corruption we've seen
+    }
+    
+    fixed_code = manim_code
+    
+    # Only fix obvious LaTeX corruption within MathTex/Tex contexts
+    for broken, correct in latex_fixes.items():
+        # Only replace in MathTex/Tex string contexts to avoid Python syntax corruption
+        pattern = rf'(MathTex|Tex)\s*\(\s*["\']([^"\']*){broken}([^"\']*)["\']'
+        matches = re.finditer(pattern, fixed_code)
+        for match in matches:
+            full_match = match.group(0)
+            tex_type = match.group(1)
+            before_text = match.group(2)
+            after_text = match.group(3)
+            
+            print(f"🔧 [DEBUG] Found '{broken}' in LaTeX context - replacing with '{correct}'")
+            new_content = f'{tex_type}("{before_text}{correct}{after_text}"'
+            fixed_code = fixed_code.replace(full_match, new_content)
+    
+    print(f"🔧 [DEBUG] Output code:\n{fixed_code}")
+    return fixed_code
 
 @app.get("/progress/{request_id}")
 async def get_progress(request_id: str):
@@ -70,7 +229,21 @@ async def health_check():
     return {
         "status": "healthy",
         "manim_available": True,
-        "ffmpeg_available": FFMPEG_AVAILABLE
+        "ffmpeg_available": FFMPEG_AVAILABLE,
+        "sox_available": check_sox()
+    }
+
+@app.get("/check-latex")
+async def check_latex():
+    """Endpoint to check if LaTeX is available and working"""
+    latex_available = is_latex_available()
+    latex_bin = shutil.which("latex") or shutil.which("xelatex")
+    
+    return {
+        "latex_available": latex_available,
+        "latex_path": latex_bin,
+        "fallback_enabled": AUTO_FALLBACK_TO_TEXT,
+        "recommended_action": "none" if latex_available else "install_latex"
     }
 
 @app.post("/combine-videos", response_model=ManimResponse)
@@ -238,6 +411,13 @@ async def generate_video(request: ManimRequest):
 
         raw_code = request.manimCode or ""
         manim_code = raw_code.strip()
+        
+        print(f"🎬 [DEBUG] Original manim code received:\n{manim_code}")
+        
+        # Fix LaTeX escaping issues first
+        manim_code = fix_latex_escaping(manim_code)
+        
+        print(f"🎬 [DEBUG] Fixed manim code after escaping:\n{manim_code}")
 
         # Ensure import header present
         if "from manim import" not in manim_code.splitlines()[0]:
@@ -260,17 +440,29 @@ async def generate_video(request: ManimRequest):
 
         print(f"🧪 Detected scene class: {scene_class}")
 
-        # Quick LaTeX availability check (latex or xelatex)
-        latex_available = shutil.which("latex") or shutil.which("xelatex")
-        if not latex_available:
-            print("⚠️ LaTeX distribution not detected (latex/xelatex missing). MathTex objects may fail.")
-            print("   Install MiKTeX (Windows) or TeX Live and ensure the binaries are in PATH for MathTex rendering.")
+        # Analyze code for potential issues and apply fixes
+        analysis = analyze_manim_code(manim_code)
+        if analysis["issues"]:
+            print(f"⚠️ Issues detected in Manim code:")
+            for issue in analysis["issues"]:
+                if issue["type"] == "latex_missing":
+                    print(f"  • Missing LaTeX with {issue['count']} LaTeX objects detected")
+                    if AUTO_FALLBACK_TO_TEXT:
+                        print(f"  • Auto-replacing LaTeX elements with Text")
+                        manim_code = modify_code_for_latex_fallback(manim_code)
+                        
+                        # Also save a copy for debugging
+                        modified_file = temp_dir / "modified_scene.py"
+                        with open(modified_file, 'w', encoding='utf-8') as f:
+                            f.write(manim_code)
+                        print(f"📄 Modified code saved to: {modified_file}")
 
         # Write the code to file
         with open(script_file, 'w', encoding='utf-8') as f:
             f.write(manim_code)
 
         print(f"📄 Script written to: {script_file}")
+        print(f"🎬 [DEBUG] Final script content being written:\n{manim_code}")
 
         progress_tracker[request_id] = f"Rendering {scene_class} with Manim..."
 
@@ -295,12 +487,36 @@ async def generate_video(request: ManimRequest):
             )
             if result.returncode != 0:
                 progress_tracker[request_id] = "Failed: Manim rendering error"
-                error_msg = f"Manim generation failed:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
+                
+                # Check for specific LaTeX errors
+                latex_error = extract_latex_error(result.stderr)
+                if latex_error:
+                    error_msg = f"LaTeX error: {latex_error}"
+                    if not is_latex_available():
+                        error_msg += "\nLaTeX not found. Please install MiKTeX or TeX Live."
+                else:
+                    error_msg = f"Manim generation failed:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
+                
                 print(f"❌ {error_msg}")
                 return ManimResponse(success=False, error=error_msg)
         except subprocess.TimeoutExpired:
             progress_tracker[request_id] = "Failed: Manim render timeout"
             return ManimResponse(success=False, error="Manim rendering timed out (5 minutes)")
+        except Exception as e:
+            error_msg = f"Error during Manim rendering: {str(e)}"
+            
+            # Check for specific LaTeX errors if stderr is available
+            latex_error = None
+            if hasattr(e, "stderr") and e.stderr:
+                latex_error = extract_latex_error(e.stderr)
+            
+            if latex_error:
+                error_msg = f"LaTeX error: {latex_error}"
+                if not is_latex_available():
+                    error_msg += "\nLaTeX not found. Please install MiKTeX or TeX Live."
+            
+            progress_tracker[request_id] = f"Failed: {error_msg}"
+            return ManimResponse(success=False, error=error_msg)
 
         progress_tracker[request_id] = "Locating output video..."
         video_files = list(temp_dir.rglob(f"{scene_class_for_cmd}_*.mp4")) or list(temp_dir.rglob("*.mp4"))
@@ -399,16 +615,45 @@ async def generate_video(request: ManimRequest):
             error=error_msg
         )
     finally:
+        # In debug mode, save the script file before cleanup
+        if DEBUG_MODE:
+            debug_dir = Path(__file__).parent / "debug" / request_id
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Save the original script
+            if script_file.exists():
+                shutil.copy2(script_file, debug_dir / "scene.py")
+            
+            # Save modified script if it exists
+            modified_file = temp_dir / "modified_scene.py"
+            if modified_file.exists():
+                shutil.copy2(modified_file, debug_dir / "modified_scene.py")
+            
+            # Save logs if available
+            log_file = temp_dir / "manim.log"
+            if log_file.exists():
+                shutil.copy2(log_file, debug_dir / "manim.log")
+                
+            print(f"🐛 Debug files saved to {debug_dir}")
+        
         # Clean up temporary directory
-        try:
-            shutil.rmtree(temp_dir)
-        except Exception as e:
-            print(f"⚠️ Failed to clean up temp directory: {e}")
+        if not DEBUG_MODE:
+            try:
+                shutil.rmtree(temp_dir)
+            except Exception as e:
+                print(f"⚠️ Failed to clean up temp directory: {e}")
+        else:
+            print(f"🔍 Debug mode: Temporary directory preserved at {temp_dir}")
 
 if __name__ == "__main__":
     print("🚀 Starting 3D Avatar Manim Worker...")
     print(f"📁 Output directory: {OUTPUT_DIR.absolute()}")
+    
+    # Check and install dependencies
+    check_and_install_dependencies()
+    
     print(f"🎬 FFmpeg available: {FFMPEG_AVAILABLE}")
+    print(f"🎵 SoX available: {check_sox()}")
     
     uvicorn.run(
         app,
