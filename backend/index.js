@@ -446,6 +446,7 @@ app.post("/chat", async (req, res) => {
       }
       
       messages = JSON.parse(responseContent);
+      console.log("Parsed messages from AI:", JSON.stringify(messages, null, 2));
     } catch (parseError) {
       console.error("JSON Parse Error:", parseError.message);
       console.error("Response structure:", response);
@@ -490,10 +491,18 @@ app.post("/chat", async (req, res) => {
         // Allow empty chatResponse for multi-part videos (only first part needs chat response)
         if (message.chatResponse === undefined || message.videoExplanation === undefined || 
             !message.facialExpression || !message.animation) {
+          console.log(`Message at index ${i}:`, JSON.stringify(message, null, 2));
+          console.log(`Missing fields check:`, {
+            hasChatResponse: message.chatResponse !== undefined,
+            hasVideoExplanation: message.videoExplanation !== undefined,
+            hasFacialExpression: !!message.facialExpression,
+            hasAnimation: !!message.animation
+          });
           throw new Error(`Invalid video mode message format at index ${i}: missing required fields`);
         }
-        if (!message.manimCode) {
-          throw new Error(`Missing manimCode for video mode at index ${i}`);
+        if (!message.manimCode || message.manimCode.trim() === '') {
+          console.log(`Message at index ${i}:`, JSON.stringify(message, null, 2));
+          throw new Error(`Missing or empty manimCode for video mode at index ${i}`);
         }
         textForAudio = message.videoExplanation; // Use video explanation for speech synthesis
         textForChat = message.chatResponse || `Part ${i + 1} of video explanation`; // Fallback for empty chat response
