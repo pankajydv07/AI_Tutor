@@ -1,7 +1,11 @@
 venv/
-__pycache__/
+_pycache_/
 node_modules/
 *.mp3
 *.wav
-debug
+*.ogg   
 *.mp4
+*.avi
+backend/node_modules/
+worker/debug/
+uploads/videos/

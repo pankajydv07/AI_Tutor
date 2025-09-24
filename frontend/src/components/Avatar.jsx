@@ -105,9 +105,12 @@ export function Avatar(props) {
     "/models/68a8184c78a54f62ce4e9d73.glb"
   );
 
-  const { message, onMessagePlayed, chat } = useChat();
+  const { message, onMessagePlayed, chat, getVideoSyncState } = useChat();
 
   const [lipsync, setLipsync] = useState();
+  const [videoSyncMode, setVideoSyncMode] = useState(false);
+  const [currentVideoSessionId, setCurrentVideoSessionId] = useState(null);
+  const [audio, setAudio] = useState();
 
   useEffect(() => {
     console.log("Message:", message);
@@ -115,16 +118,206 @@ export function Avatar(props) {
     if (!message) {
       setAnimation("Idle");
       setupMode = false; // Reset setupMode
+      setVideoSyncMode(false);
+      setCurrentVideoSessionId(null);
       return;
     }
+    
+    // Check if this is a video explanation message (has videoExplanation or is part of video session)
+    const isVideoMessage = message.videoExplanation || (message.sessionId && message.manimCode);
+    
+    console.log("🔍 Message analysis:", {
+      hasVideoExplanation: !!message.videoExplanation,
+      hasSessionId: !!message.sessionId,
+      hasManimCode: !!message.manimCode,
+      isVideoMessage: isVideoMessage,
+      useVideoAudio: !!message.useVideoAudio
+    });
+    
     setAnimation(message.animation);
     setFacialExpression(message.facialExpression);
     setLipsync(message.lipsync);
-    const audio = new Audio("data:audio/mp3;base64," + message.audio);
-    audio.play().catch((error) => console.error("Audio playback failed:", error));
-    setAudio(audio);
-    audio.onended = onMessagePlayed;
+    
+    if (isVideoMessage && message.sessionId) {
+      // This is a video explanation - avatar should sync directly with video audio
+      console.log("🎬 Setting up video sync mode for session:", message.sessionId);
+      setVideoSyncMode(true);
+      setCurrentVideoSessionId(message.sessionId);
+      
+      if (message.useVideoAudio && message.audioUrl) {
+        // NEW: Use the video's audio URL directly - no separate avatar audio
+        console.log("🎵 Avatar will sync with video audio:", message.audioUrl);
+        setAudio(null); // No separate audio - will get from video element directly
+      } else {
+        // Fallback: Create muted audio for lip sync timing (old behavior)
+        const audio = new Audio("data:audio/mp3;base64," + message.audio);
+        audio.muted = true;
+        setAudio(audio);
+      }
+      
+      // Don't call onMessagePlayed immediately for video messages
+      // It will be called when video ends
+    } else {
+      // Regular chat message - play audio normally with lip-sync
+      console.log("💬 Setting up chat mode with TTS audio and lip-sync");
+      setVideoSyncMode(false);
+      setCurrentVideoSessionId(null);
+      
+      if (message.audio) {
+        const audio = new Audio("data:audio/mp3;base64," + message.audio);
+        console.log("🎵 Chat audio created, will play audio with duration:", audio.duration || "unknown");
+        
+        // Set up event listeners before playing
+        audio.onloadedmetadata = () => {
+          console.log("🎵 Chat audio metadata loaded, duration:", audio.duration);
+        };
+        
+        audio.ontimeupdate = () => {
+          console.log("🎵 Chat audio time update:", audio.currentTime, "/", audio.duration);
+        };
+        
+        audio.onplay = () => {
+          console.log("▶️ Chat audio started playing");
+        };
+        
+        audio.onpause = () => {
+          console.log("⏸️ Chat audio paused");
+        };
+        
+        audio.onended = () => {
+          console.log("🔚 Chat audio ended");
+          onMessagePlayed();
+        };
+        
+        audio.onerror = (error) => {
+          console.error("❌ Chat audio error:", error);
+        };
+        
+        // Attempt to play
+        audio.play().catch((error) => {
+          console.error("❌ Audio playback failed:", error);
+          console.error("Error details:", error.name, error.message);
+        });
+        
+        setAudio(audio);
+      } else {
+        console.error("❌ No audio data found for chat message");
+        console.log("Message object:", message);
+      }
+    }
   }, [message]);
+
+  // Handle video synchronization - NEW: Direct sync with video audio
+  useEffect(() => {
+    if (!videoSyncMode || !currentVideoSessionId) return;
+
+    const videoSyncState = getVideoSyncState(currentVideoSessionId);
+    if (!videoSyncState) return;
+
+    console.log("🎵 Video sync state:", videoSyncState);
+
+    // NEW: For messages that use video audio, we don't need separate audio management
+    // The lip-sync timing comes directly from the video's currentTime
+    if (message && message.useVideoAudio) {
+      // Direct synchronization - lip-sync timing comes from video playback
+      console.log("🎬 Direct video audio sync - no separate audio needed");
+      return;
+    }
+
+    // LEGACY: For backward compatibility with old system (separate muted audio)
+    if (!audio) return;
+
+    // Check if this is a recent update (within last 500ms) indicating a seek operation
+    const isRecentUpdate = videoSyncState.lastUpdateTime && (Date.now() - videoSyncState.lastUpdateTime) < 500;
+
+    if (videoSyncState.isPlaying && audio.paused) {
+      // Video is playing, start avatar lip sync timing (muted audio for timing only)
+      console.log("▶️ Starting avatar lip sync timing to match video");
+      audio.currentTime = videoSyncState.currentTime || 0;
+      // Play muted audio for lip-sync timing
+      audio.play().catch((error) => console.error("Avatar lip sync timing failed:", error));
+    } else if (!videoSyncState.isPlaying && !audio.paused) {
+      // Video is paused, pause avatar lip sync timing
+      console.log("⏸️ Pausing avatar lip sync timing with video");
+      audio.pause();
+    }
+
+    // Enhanced sync audio timing with video time for accurate lip sync
+    const timeDifference = Math.abs(audio.currentTime - (videoSyncState.currentTime || 0));
+    if (videoSyncState.currentTime !== undefined && (timeDifference > 0.2 || isRecentUpdate)) {
+      console.log(`⏭️ Syncing avatar lip sync timing: ${audio.currentTime.toFixed(2)} -> ${(videoSyncState.currentTime || 0).toFixed(2)} (diff: ${timeDifference.toFixed(2)}s, recent: ${isRecentUpdate})`);
+      audio.currentTime = videoSyncState.currentTime || 0;
+    }
+  }, [videoSyncMode, currentVideoSessionId, audio, message, getVideoSyncState]);
+
+  // Monitor video sync state changes
+  useEffect(() => {
+    if (!videoSyncMode || !currentVideoSessionId) return;
+
+    const interval = setInterval(() => {
+      const videoSyncState = getVideoSyncState(currentVideoSessionId);
+      if (videoSyncState && audio) {
+        // Check if video ended
+        if (!videoSyncState.isPlaying && videoSyncState.currentTime === 0) {
+          console.log("🔚 Video ended, stopping avatar lip sync");
+          audio.pause();
+          audio.currentTime = 0;
+          onMessagePlayed(); // Mark message as played
+        }
+      }
+    }, 500); // Check every 500ms
+
+    return () => clearInterval(interval);
+  }, [videoSyncMode, currentVideoSessionId, audio, onMessagePlayed, getVideoSyncState]);
+
+  // Animation Timeline Execution for Chat Mode
+  useEffect(() => {
+    // Only execute animation timeline for chat mode (non-video messages)
+    if (!message || videoSyncMode || !message.animationTimeline || !Array.isArray(message.animationTimeline)) {
+      return;
+    }
+
+    console.log("🎭 Executing animation timeline for chat mode:", message.animationTimeline);
+    
+    const timeouts = [];
+    
+    // Execute each animation timeline entry at specified times
+    message.animationTimeline.forEach((timelineItem, index) => {
+      const timeoutId = setTimeout(() => {
+        console.log(`🎭 Timeline ${index}: ${timelineItem.action} at ${timelineItem.time}s - ${timelineItem.animation} / ${timelineItem.expression}`);
+        setAnimation(timelineItem.animation);
+        setFacialExpression(timelineItem.expression);
+      }, timelineItem.time * 1000); // Convert seconds to milliseconds
+      
+      timeouts.push(timeoutId);
+    });
+
+    // Cleanup function to clear all timeouts when component unmounts or message changes
+    return () => {
+      timeouts.forEach(timeoutId => clearTimeout(timeoutId));
+    };
+  }, [message, videoSyncMode]); // Re-run when message changes or videoSyncMode changes
+
+  // Video Mode Animation Control - Only animate when video is playing
+  useEffect(() => {
+    if (!videoSyncMode || !currentVideoSessionId) return;
+
+    const videoSyncState = getVideoSyncState(currentVideoSessionId);
+    if (!videoSyncState) return;
+
+    // Control avatar animation based on video playback state
+    if (videoSyncState.isPlaying) {
+      // Video is playing - avatar can animate normally
+      if (message && message.animation) {
+        console.log("▶️ Video playing - enabling avatar animation:", message.animation);
+        setAnimation(message.animation);
+      }
+    } else {
+      // Video is paused or stopped - set avatar to idle
+      console.log("⏸️ Video paused/stopped - setting avatar to idle");
+      setAnimation("Idle");
+    }
+  }, [videoSyncMode, currentVideoSessionId, getVideoSyncState, message]);
 
   const { animations } = useGLTF("/models/animations.glb");
 
@@ -179,7 +372,6 @@ export function Avatar(props) {
   const [winkLeft, setWinkLeft] = useState(false);
   const [winkRight, setWinkRight] = useState(false);
   const [facialExpression, setFacialExpression] = useState("");
-  const [audio, setAudio] = useState();
 
   useFrame(() => {
     console.log("Setup mode:", setupMode);
@@ -204,21 +396,47 @@ export function Avatar(props) {
     }
 
     const appliedMorphTargets = [];
-    if (message && lipsync && audio) {
-      const currentAudioTime = audio.currentTime;
-      console.log("Current audio time:", currentAudioTime, "Mouth cues:", lipsync.mouthCues);
-      for (let i = 0; i < lipsync.mouthCues.length; i++) {
-        const mouthCue = lipsync.mouthCues[i];
-        if (
-          currentAudioTime >= mouthCue.start &&
-          currentAudioTime <= mouthCue.end
-        ) {
-          const viseme = corresponding[mouthCue.value];
-          console.log("Applying viseme:", viseme);
-          appliedMorphTargets.push(viseme);
-          lerpMorphTarget(viseme, 1, 0.2);
-          break;
+    if (message && lipsync) {
+      let currentAudioTime = 0;
+      let shouldApplyLipSync = false;
+      
+      // NEW: Get timing from video sync state if using video audio
+      if (videoSyncMode && currentVideoSessionId && message.useVideoAudio) {
+        const videoSyncState = getVideoSyncState(currentVideoSessionId);
+        if (videoSyncState && videoSyncState.isPlaying) {
+          currentAudioTime = videoSyncState.currentTime || 0;
+          shouldApplyLipSync = true;
+          console.log("🎬 Video audio time:", currentAudioTime, "Mouth cues:", lipsync.mouthCues?.length);
+        } else {
+          // Video not playing - no lip sync
+          currentAudioTime = -1;
+          shouldApplyLipSync = false;
         }
+      } 
+      // CHAT MODE: Use separate audio timing
+      else if (audio && !videoSyncMode) {
+        currentAudioTime = audio.currentTime;
+        shouldApplyLipSync = !audio.paused && !audio.ended;
+        console.log("💬 Chat audio time:", currentAudioTime, "Paused:", audio.paused, "Ended:", audio.ended, "Mouth cues:", lipsync.mouthCues?.length);
+      }
+      
+      // Apply lip-sync based on current time
+      if (shouldApplyLipSync && currentAudioTime >= 0 && lipsync.mouthCues) {
+        for (let i = 0; i < lipsync.mouthCues.length; i++) {
+          const mouthCue = lipsync.mouthCues[i];
+          if (
+            currentAudioTime >= mouthCue.start &&
+            currentAudioTime <= mouthCue.end
+          ) {
+            const viseme = corresponding[mouthCue.value];
+            console.log("👄 Applying viseme:", viseme, "at time:", currentAudioTime, "for cue:", mouthCue.value);
+            appliedMorphTargets.push(viseme);
+            lerpMorphTarget(viseme, 1, 0.2);
+            break;
+          }
+        }
+      } else if (!shouldApplyLipSync) {
+        console.log("🔇 Lip-sync disabled - audio not playing");
       }
     }
 

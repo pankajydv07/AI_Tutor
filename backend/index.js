@@ -101,8 +101,57 @@ const generateSpeech = async (text, fileName) => {
     // Save to file
     await fs.writeFile(fileName, buffer);
     console.log(`Audio saved to ${fileName}`);
+    return fileName;
   } catch (error) {
     console.error(`Error generating speech: ${error.message}`);
+    throw error;
+  }
+};
+
+// Function to generate combined narration audio for video synchronization
+const generateVideoNarrationAudio = async (videoExplanationText, sessionId) => {
+  try {
+    const fileName = `audios/video_narration_${sessionId}.mp3`;
+    console.log(`🎵 Generating video narration audio: ${fileName}`);
+    
+    const audio = await elevenlabs.generate({
+      voice: voiceID,
+      text: videoExplanationText,
+      model_id: "eleven_multilingual_v2",
+    });
+    
+    // Convert audio stream to buffer
+    const chunks = [];
+    for await (const chunk of audio) {
+      chunks.push(chunk);
+    }
+    const buffer = Buffer.concat(chunks);
+    
+    // Save to file
+    await fs.writeFile(fileName, buffer);
+    console.log(`✅ Video narration audio saved: ${fileName}`);
+    
+    // Generate lip-sync data for avatar
+    const wavFileName = `audios/video_narration_${sessionId}.wav`;
+    const jsonFileName = `audios/video_narration_${sessionId}.json`;
+    
+    // Convert to WAV for lip-sync processing
+    await execCommand(`ffmpeg -y -i ${fileName} ${wavFileName}`);
+    
+    // Generate lip-sync JSON
+    const rhubarbPath = process.platform === "win32"
+      ? path.join("bin", "rhubarb.exe")
+      : path.join("bin", "rhubarb");
+    
+    await execCommand(`${rhubarbPath} -f json -o ${jsonFileName} ${wavFileName} -r phonetic`);
+    
+    return {
+      audioFile: fileName,
+      wavFile: wavFileName,
+      lipsyncFile: jsonFileName
+    };
+  } catch (error) {
+    console.error(`❌ Error generating video narration audio: ${error.message}`);
     throw error;
   }
 };
@@ -111,20 +160,28 @@ const generateSpeech = async (text, fileName) => {
 const videoGenerationStore = new Map();
 
 // Function to generate video using manim worker
-const generateVideo = async (manimCode, messageId, audioPath = null) => {
+const generateVideo = async (manimCode, messageId, narrationAudioPath = null) => {
   try {
     console.log(`🎬 Sending manim code to worker for video generation...`);
+    
+    const requestBody = {
+      manimCode: manimCode,
+      messageId: messageId
+    };
+    
+    // Include narration audio if provided
+    if (narrationAudioPath) {
+      const absoluteAudioPath = path.resolve(narrationAudioPath);
+      console.log(`🎵 Including narration audio: ${narrationAudioPath} -> ${absoluteAudioPath}`);
+      requestBody.narrationAudio = absoluteAudioPath;
+    }
     
     const response = await fetch('http://127.0.0.1:8001/generate-video', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        manimCode: manimCode,
-        messageId: messageId,
-        audioPath: audioPath
-      })
+      body: JSON.stringify(requestBody)
     });
     
     if (!response.ok) {
@@ -257,7 +314,7 @@ app.post("/chat", async (req, res) => {
           {
             role: "system",
             content: videoMode 
-              ? "You are an intelligent educational assistant that creates comprehensive Manim voiceover animations for learning.\n\n⚠️ CRITICAL LATEX SAFETY RULE: ALWAYS use raw strings for mathematical content:\n✅ MathTex(r\"x \\\\\\\\approx -0.37\") - CORRECT\n❌ MathTex(\"x \\\\\\\\approx -0.37\") - WILL BREAK LaTeX\nUse r\"\" prefix for ALL MathTex/Tex content to prevent escaping corruption.\n\nINTELLIGENT VIDEO STRATEGY:\nAnalyze the user's question and determine the optimal video approach based on content length and scene types:\n\nSPLITTING CRITERIA:\n- Split ONLY when explanation involves fundamentally different approaches/scenes\n- Each part must be at least 15 seconds of content\n- Examples of valid splits:\n  * Algebraic derivation + Geometric proof\n  * Theory explanation + Practical application\n  * Definition + Multiple examples\n  * Historical context + Modern application\n\nSINGLE VIDEO APPROACH (Preferred when possible):\n- Mathematical derivations that follow one logical flow\n- Simple concept explanations\n- Single proof demonstrations\n- Basic function/equation explanations\n\nMULTI-PART APPROACH (Only when content naturally divides):\n- Complex topics with different methodologies\n- Topics requiring both abstract and concrete examples\n- Historical + modern perspectives\n- Theory + multiple applications\n\nCONTENT LENGTH REQUIREMENTS:\n- Each video part must contain at least 15 seconds of meaningful content\n- Single videos should be 15-30 seconds\n- Multi-part videos: each part 15-25 seconds\n- Use proper pacing with strategic self.wait() statements\n\nMANIM CODE STRUCTURE (Based on proven educational patterns):\n1. ALWAYS start with: from manim import *\n2. Use Scene class (not VoiceoverScene): class DescriptiveClassName(Scene):\n3. NO TTS service initialization needed (audio files provided separately)\n   self.set_speech_service(\n       AzureService(\n           voice=\"en-US-AriaNeural\",\n           style=\"newscast-casual\",\n           global_speed=1.15\n       )\n   )\n4. Use voiceover integration: with self.voiceover(text=\"narration\") as tracker:\n5. Use proper timing with self.wait() and run_time parameters to match audio length\n\nFULL MANIM CAPABILITIES (Educational Math Focus):\n- Mathematical expressions: MathTex(), Tex() for LaTeX formulas\n- Text elements: Text() for plain text, with font_size parameter\n- Geometric shapes: Circle(), Square(), Rectangle(), Polygon(), Arc()\n- Mathematical graphs: Axes(), NumberPlane(), get_graph(), plot()\n- Complex elements: ImageMobject(), Brace(), SurroundingRectangle()\n- Positioning: .next_to(), .to_edge(), .to_corner(), .shift(), .move_to()\n- Colors: BLUE, RED, GREEN, YELLOW, WHITE, PINK, ORANGE, PURPLE, GREY\n- Animations: Create(), Write(), FadeIn(), FadeOut(), Transform(), ReplacementTransform()\n- Special effects: Flash(), Indicate(), Circumscribe(), ApplyWave()\n- Movement: MoveAlongPath(), .animate.shift(), .animate.scale()\n\nSCREEN MANAGEMENT & VISIBILITY RULES:\n6. Monitor screen space - when content gets crowded, use screen management techniques\n7. CLEAR SCREEN: Use self.clear() to start fresh when screen becomes full\n8. SLIDE CONTENT: Use .animate.shift() to move existing content up/down when adding new elements\n9. FADE TRANSITIONS: Use FadeOut() old content, then FadeIn() new content for clean transitions\n10. SCALE ELEMENTS: Use smaller font sizes or .scale() for complex content to fit properly\n11. POSITIONING STRATEGY: Use .to_edge(), .to_corner() for systematic element placement\n12. GROUP MANAGEMENT: Use VGroup to move related elements together when repositioning\n\nEDUCATIONAL STORYTELLING PATTERNS (From successful examples):\n- Start with engaging introduction/context\n- Build concepts gradually with visual support\n- Use analogies and real-world connections\n- Include step-by-step derivations for math\n- Show multiple perspectives when helpful\n- End with applications or summary\n- Use encouraging, accessible language\n\nNARRATION INTEGRATION:\n- Each voiceover segment should be substantial (2-5 sentences)\n- Match animation complexity to narration length\n- Use self.wait() between major concept transitions\n- Time animations to match speech rhythm\n- Include pauses for comprehension: self.wait(1) or self.wait(2)\n\nVISIBILITY CODE PATTERNS:\n\n# Slide existing content up when adding new\nexisting_group = VGroup(title, eq1, eq2)\nself.play(existing_group.animate.shift(UP*1.5))\nnew_equation = MathTex(r\"New step\").shift(DOWN*2)  # Note: raw string!\nself.play(Write(new_equation))\n\n# Clear screen for fresh start\nself.play(FadeOut(*self.mobjects))  # Fade out everything\nself.wait(0.5)\n# Start fresh with new content\n\n# Mathematical graph example\naxes = Axes(x_range=[-3, 3, 1], y_range=[-1, 5, 1])\ngraph = axes.plot(lambda x: x**2, color=BLUE)\nself.play(Create(axes), Create(graph))\n\nCRITICAL: Never let content go off-screen or become invisible. Always ensure all important elements are visible within the frame boundaries.\n\nEXAMPLE DECISION PROCESS:\n\n\"Explain (a+b)²\":\nDECISION: Single video (one logical flow from geometry to algebra)\nCONTENT: Geometric square setup → division → labeling → algebraic transition → final formula\n\n\"Prove Pythagorean theorem\":\nDECISION: Two parts (different proof approaches)\nPART 1: Geometric proof with squares on sides\nPART 2: Algebraic proof with coordinate geometry\n\n\"Explain quadratic functions\":\nDECISION: Two parts (theory vs applications)\nPART 1: Basic form, vertex, parabola shape, transformations\nPART 2: Real-world applications and problem solving\n\nCLASS NAMING: Use descriptive names like QuadraticExplanation, PythagoreanTheorem, AdditionExample, etc.\n\nRESPONSE FORMAT:\n\nFor single comprehensive explanation:\n[\n  {\n    \"text\": \"Complete explanation covering the entire concept with sufficient detail for 15+ seconds\",\n    \"facialExpression\": \"smile\",\n    \"animation\": \"Talking_0\",\n    \"manimCode\": \"Complete Scene with full content (15+ seconds of animation)\"\n  }\n]\n\nFor multi-part explanation (only when content naturally divides):\n[\n  {\n    \"text\": \"First major aspect/approach with detailed explanation\",\n    \"facialExpression\": \"smile\",\n    \"animation\": \"Talking_0\",\n    \"manimCode\": \"Complete first Scene (15+ seconds)\"\n  },\n  {\n    \"text\": \"Second major aspect/approach with detailed explanation\",\n    \"facialExpression\": \"default\",\n    \"animation\": \"Talking_1\",\n    \"manimCode\": \"Complete second Scene (15+ seconds)\"\n  }\n]\n\nCONTENT DENSITY REQUIREMENTS:\nEach scene must include enough elements and animations to fill 15+ seconds:\n- Multiple animation steps with proper timing\n- Gradual building of complexity\n- Clear transitions between concepts\n- Sufficient wait times for comprehension\n- Rich visual elements and transformations\n- Synchronized voiceover narration\n\nCRITICAL: Only create multiple parts when content naturally requires different scene types or approaches. Default to comprehensive single videos for most explanations."
+              ? `You are an intelligent educational assistant that creates comprehensive Manim voiceover animations for learning. You MUST generate TWO types of content: 1. CHAT RESPONSE: A concise, friendly text response for the chat history (10-50 words) 2. VIDEO EXPLANATION: A detailed narration script that explains what happens in the video. ⚠️ CRITICAL LATEX SAFETY RULE: ALWAYS use raw strings for mathematical content: ✅ MathTex(r\"x \\\\\\\\approx -0.37\") - CORRECT ❌ MathTex(\"x \\\\\\\\approx -0.37\") - WILL BREAK LaTeX. Use r\"\" prefix for ALL MathTex/Tex content to prevent escaping corruption. IMPORTANT: The chat response and video explanation serve different purposes: - Chat response: Shows in chat history, answers the user's question directly - Video explanation: Narrates and describes the visual content in the generated video. INTELLIGENT VIDEO STRATEGY: Analyze the user's question and determine the optimal video approach based on content length and scene types. SPLITTING CRITERIA: - Split ONLY when explanation involves fundamentally different approaches/scenes - Each part must be at least 15 seconds of content - Examples of valid splits: * Algebraic derivation + Geometric proof * Theory explanation + Practical application * Definition + Multiple examples * Historical context + Modern application. SINGLE VIDEO APPROACH (Preferred when possible): - Mathematical derivations that follow one logical flow - Simple concept explanations - Single proof demonstrations - Basic function/equation explanations. MULTI-PART APPROACH (Only when content naturally divides): - Complex topics with different methodologies - Topics requiring both abstract and concrete examples - Historical + modern perspectives - Theory + multiple applications. CONTENT LENGTH REQUIREMENTS: - Each video part must contain at least 15 seconds of meaningful content - Single videos should be 15-30 seconds - Multi-part videos: each part 15-25 seconds - Use proper pacing with strategic self.wait() statements. MANIM CODE STRUCTURE (Based on proven educational patterns): 1. ALWAYS start with: from manim import * 2. Use Scene class (not VoiceoverScene): class DescriptiveClassName(Scene): 3. NO voiceover methods - audio handled separately by backend system 4. DO NOT use self.voiceover() or VoiceoverScene - will cause errors 5. Use proper timing with self.wait() and run_time parameters for pacing. FULL MANIM CAPABILITIES (Educational Math Focus): - Mathematical expressions: MathTex(), Tex() for LaTeX formulas - Text elements: Text() for plain text, with font_size parameter - Geometric shapes: Circle(), Square(), Rectangle(), Polygon(), Arc() - Mathematical graphs: Axes(), NumberPlane(), get_graph(), plot() - Complex elements: ImageMobject(), Brace(), SurroundingRectangle() - Positioning: .next_to(), .to_edge(), .to_corner(), .shift(), .move_to() - Colors: BLUE, RED, GREEN, YELLOW, WHITE, PINK, ORANGE, PURPLE, GREY - Animations: Create(), Write(), FadeIn(), FadeOut(), Transform(), ReplacementTransform() - Special effects: Flash(), Indicate(), Circumscribe(), ApplyWave() - Movement: MoveAlongPath(), .animate.shift(), .animate.scale(). SCREEN MANAGEMENT & VISIBILITY RULES: 6. Monitor screen space - when content gets crowded, use screen management techniques 7. CLEAR SCREEN: Use self.clear() to start fresh when screen becomes full 8. SLIDE CONTENT: Use .animate.shift() to move existing content up/down when adding new elements 9. FADE TRANSITIONS: Use FadeOut() old content, then FadeIn() new content for clean transitions 10. SCALE ELEMENTS: Use smaller font sizes or .scale() for complex content to fit properly 11. POSITIONING STRATEGY: Use .to_edge(), .to_corner() for systematic element placement 12. GROUP MANAGEMENT: Use VGroup to move related elements together when repositioning. EDUCATIONAL STORYTELLING PATTERNS: - Start with engaging introduction/context - Build concepts gradually with visual support - Use analogies and real-world connections - Include step-by-step derivations for math - Show multiple perspectives when helpful - End with applications or summary - Use encouraging, accessible language. TIMING AND PACING GUIDELINES: - Each animation sequence should be substantial (15+ seconds) - Use self.wait() between major concept transitions - Time animations appropriately with run_time parameters - Include pauses for comprehension: self.wait(1) or self.wait(2) - Audio narration will be added automatically by the system. VISIBILITY CODE PATTERNS: # Slide existing content up when adding new existing_group = VGroup(title, eq1, eq2) self.play(existing_group.animate.shift(UP*1.5)) new_equation = MathTex(r\"New step\").shift(DOWN*2) self.play(Write(new_equation)) # Clear screen for fresh start self.play(FadeOut(*self.mobjects)) self.wait(0.5) # Start fresh with new content # Mathematical graph example axes = Axes(x_range=[-3, 3, 1], y_range=[-1, 5, 1]) graph = axes.plot(lambda x: x**2, color=BLUE) self.play(Create(axes), Create(graph)) self.wait(2). EXAMPLE DECISION PROCESS: \"Explain (a+b)²\": DECISION: Single video (one logical flow from geometry to algebra) CONTENT: Geometric square setup → division → labeling → algebraic transition → final formula. \"Prove Pythagorean theorem\": DECISION: Two parts (different proof approaches) PART 1: Geometric proof with squares on sides PART 2: Algebraic proof with coordinate geometry. \"Explain quadratic functions\": DECISION: Two parts (theory vs applications) PART 1: Basic form, vertex, parabola shape, transformations PART 2: Real-world applications and problem solving. CLASS NAMING: Use descriptive names like QuadraticExplanation, PythagoreanTheorem, AdditionExample, etc. RESPONSE FORMAT: For single comprehensive explanation: [ { \"chatResponse\": \"Brief, friendly answer for chat history (10-50 words)\", \"videoExplanation\": \"Detailed narration explaining what the viewer sees in the video\", \"facialExpression\": \"smile\", \"animation\": \"Talking_0\", \"manimCode\": \"Complete scene with full content (15+ seconds of animation)\" } ] For multi-part explanation (only when content naturally divides): [ { \"chatResponse\": \"Brief, friendly answer covering the topic (10-50 words)\", \"videoExplanation\": \"Detailed narration for the first part of the video\", \"facialExpression\": \"smile\", \"animation\": \"Talking_0\", \"manimCode\": \"Complete first scene (15+ seconds)\" }, { \"chatResponse\": \"\", \"videoExplanation\": \"Detailed narration for the second part of the video\", \"facialExpression\": \"default\", \"animation\": \"Talking_1\", \"manimCode\": \"Complete second scene (15+ seconds)\" } ]. CONTENT DENSITY REQUIREMENTS: Each scene must include enough elements and animations to fill 15+ seconds: - Multiple animation steps with proper timing - Gradual building of complexity - Clear transitions between concepts - Sufficient wait times for comprehension - Rich visual elements and transformations - Well-paced educational content. CRITICAL: Only create multiple parts when content naturally requires different scene types or approaches. Default to comprehensive single videos for most explanations.`
               : "You are a wise and patient AI tutor, dedicated to teaching math, science, and coding with clarity, encouragement, and care. Your responses should be concise (10–50 words), clear, and supportive, making complex ideas simple and approachable. Use a warm, guiding tone that inspires curiosity and confidence. Respond only with a valid JSON array containing 1 to 3 message objects. Each message object must have exactly three properties: \"text\" (a string with your response), \"facialExpression\" (one of: smile, sad, surprised, funnyFace, default), and \"animation\" (one of: Talking_0, Talking_1, Talking_2, Laughing, Idle). Always include at least one message that gently invites the learner to share their question, struggle, or interest (e.g., \"Tell me, what would you like to learn today?\"). Choose animations that match the teaching tone: Talking animations for explanations, Laughing for encouragement, Idle for pauses, and Surprised for moments of discovery. If the learner's message is unclear or empty, respond with a single message that kindly asks for clarification."
           },
           {
@@ -275,9 +332,13 @@ app.post("/chat", async (req, res) => {
               items: {
                 type: "object",
                 properties: videoMode ? {
-                  text: {
+                  chatResponse: {
                     type: "string",
-                    description: "The message text from the avatar"
+                    description: "Brief, friendly text response for chat history (10-50 words)"
+                  },
+                  videoExplanation: {
+                    type: "string",
+                    description: "Detailed narration script that explains what happens in the video"
                   },
                   facialExpression: {
                     type: "string",
@@ -300,16 +361,45 @@ app.post("/chat", async (req, res) => {
                   },
                   facialExpression: {
                     type: "string",
-                    enum: ["smile", "sad", "angry", "surprised", "funnyFace", "default"],
+                    enum: ["smile", "sad", "angry", "surprised", "default"],
                     description: "The facial expression for the avatar"
                   },
                   animation: {
                     type: "string",
-                    enum: ["Talking_0", "Talking_1", "Talking_2", "Crying", "Laughing", "Rumba", "Idle", "Terrified", "Angry"],
+                    enum: ["Talking_0", "Talking_1", "Talking_2", "Idle"],
                     description: "The animation for the avatar"
+                  },
+                  animationTimeline: {
+                    type: "array",
+                    description: "Timeline of animation changes during speech for dynamic avatar behavior",
+                    items: {
+                      type: "object",
+                      properties: {
+                        time: {
+                          type: "number",
+                          description: "Time in seconds when this animation change occurs"
+                        },
+                        action: {
+                          type: "string",
+                          description: "Description of what the avatar is doing (e.g., greeting, explanation, encouragement)"
+                        },
+                        animation: {
+                          type: "string",
+                          enum: ["Talking_0", "Talking_1", "Talking_2", "Idle"],
+                          description: "The animation for this timeline point"
+                        },
+                        expression: {
+                          type: "string",
+                          enum: ["smile", "sad", "angry", "surprised", "default"],
+                          description: "The facial expression for this timeline point"
+                        }
+                      },
+                      required: ["time", "action", "animation", "expression"],
+                      additionalProperties: false
+                    }
                   }
                 },
-                required: videoMode ? ["text", "facialExpression", "animation", "manimCode"] : ["text", "facialExpression", "animation"],
+                required: videoMode ? ["chatResponse", "videoExplanation", "facialExpression", "animation", "manimCode"] : ["text", "facialExpression", "animation", "animationTimeline"],
                 additionalProperties: false
               },
               minItems: 1,
@@ -433,46 +523,92 @@ app.post("/chat", async (req, res) => {
     }
 
     // Process messages for audio and lipsync immediately
+    let videoNarrationAudioFiles = null;
+    
+    if (videoMode && messages.length > 0) {
+      // For video mode, generate unified narration audio from all video explanations
+      const combinedVideoExplanation = messages.map(msg => msg.videoExplanation).join(' ');
+      console.log(`🎵 Generating unified video narration audio...`);
+      videoNarrationAudioFiles = await generateVideoNarrationAudio(combinedVideoExplanation, sessionId);
+    }
+    
     for (let i = 0; i < messages.length; i++) {
       const message = messages[i];
-      if (!message.text || !message.facialExpression || !message.animation) {
-        throw new Error(`Invalid message format at index ${i}`);
+      
+      // Handle video mode vs regular mode structure
+      let textForAudio, textForChat;
+      if (videoMode) {
+        // Allow empty chatResponse for multi-part videos (only first part needs chat response)
+        if (message.chatResponse === undefined || message.videoExplanation === undefined || 
+            !message.facialExpression || !message.animation) {
+          throw new Error(`Invalid video mode message format at index ${i}: missing required fields`);
+        }
+        if (!message.manimCode) {
+          throw new Error(`Missing manimCode for video mode at index ${i}`);
+        }
+        textForAudio = message.videoExplanation; // Use video explanation for speech synthesis
+        textForChat = message.chatResponse || `Part ${i + 1} of video explanation`; // Fallback for empty chat response
+        message.text = textForChat; // Add text field for compatibility
+      } else {
+        if (!message.text || !message.facialExpression || !message.animation) {
+          throw new Error(`Invalid message format at index ${i}`);
+        }
+        textForAudio = message.text;
+        textForChat = message.text;
       }
 
-      // Validate video mode specific fields
-      if (videoMode && !message.manimCode) {
-        console.warn(`⚠️ Missing manimCode for video mode at index ${i}, adding fallback`);
-        // Add a simple fallback Manim code instead of throwing error
-        message.manimCode = `from manim import *
-
-class SimpleMessageScene(Scene):
-    def construct(self):
-        # Simple text display for missing content
-        text = Text("${message.text.substring(0, 50).replace(/"/g, '\\"')}...")
-        text.scale(0.8)
-        self.play(Write(text))
-        self.wait(3)
-        self.play(FadeOut(text))`;
-      }
-
-      const validExpressions = ["smile", "sad", "angry", "surprised", "funnyFace", "default"];
-      const validAnimations = ["Talking_0", "Talking_1", "Talking_2", "Crying", "Laughing", "Rumba", "Idle", "Terrified", "Angry"];
+      const validExpressions = ["smile", "sad", "angry", "surprised", "default"];
+      const validAnimations = ["Talking_0", "Talking_1", "Talking_2", "Idle"];
       if (!validExpressions.includes(message.facialExpression) || !validAnimations.includes(message.animation)) {
         throw new Error(`Invalid facialExpression or animation at index ${i}`);
       }
 
-      const fileName = `audios/message_${i}.mp3`;
-      console.log(`Generating audio for message ${i}: ${message.text}`);
+      // Validate animation timeline for chat mode
+      if (!videoMode && message.animationTimeline) {
+        if (!Array.isArray(message.animationTimeline)) {
+          throw new Error(`Invalid animationTimeline format at index ${i}: must be an array`);
+        }
+        for (const timelineItem of message.animationTimeline) {
+          if (typeof timelineItem.time !== 'number' || !timelineItem.action || !timelineItem.animation || !timelineItem.expression) {
+            throw new Error(`Invalid animationTimeline item at index ${i}: missing required fields`);
+          }
+          if (!validExpressions.includes(timelineItem.expression) || !validAnimations.includes(timelineItem.animation)) {
+            throw new Error(`Invalid animationTimeline item at index ${i}: invalid expression or animation`);
+          }
+        }
+      }
+
+      if (videoMode && videoNarrationAudioFiles) {
+        // For video mode, provide the video's audio URL for direct avatar synchronization
+        console.log(`🎵 Using unified narration audio for avatar sync`);
+        
+        // Don't send base64 audio - instead provide the audio URL for direct access
+        message.audioUrl = `http://localhost:3001/audio/${path.basename(videoNarrationAudioFiles.audioFile)}`;
+        message.lipsync = await readJsonTranscript(videoNarrationAudioFiles.lipsyncFile);
+        message.narrationAudioFile = videoNarrationAudioFiles.audioFile; // For video generation
+        
+        // Add flag to indicate this uses video audio (no separate avatar audio)
+        message.useVideoAudio = true;
+      } else {
+        // Regular mode - generate individual message audio
+        const fileName = `audios/message_${i}.mp3`;
+        console.log(`Generating audio for message ${i}: ${textForAudio}`);
+        
+        // Generate speech using the video explanation text (for avatar narration)
+        await generateSpeech(textForAudio, fileName);
+        
+        // Generate lip-sync data
+        await lipSyncMessage(i);
+        
+        // Add audio and lipsync data to message
+        message.audio = await audioFileToBase64(fileName);
+        message.lipsync = await readJsonTranscript(`audios/message_${i}.json`);
+      }
       
-      // Generate speech using the new ElevenLabs client
-      await generateSpeech(message.text, fileName);
-      
-      // Generate lip-sync data
-      await lipSyncMessage(i);
-      
-      // Add audio and lipsync data to message
-      message.audio = await audioFileToBase64(fileName);
-      message.lipsync = await readJsonTranscript(`audios/message_${i}.json`);
+      // In video mode, add additional fields for frontend processing
+      if (videoMode) {
+        message.sessionId = sessionId;
+      }
     }
 
     // Send immediate response with text and audio
@@ -502,9 +638,11 @@ class SimpleMessageScene(Scene):
             // Generate individual video
             try {
               const messageId = `${Date.now()}_${i}`;
-              const audioPath = `audios/message_${i}.wav`; // Path to the generated audio file
               console.log(`🎬 Background generating video ${i + 1}/${messages.length}...`);
-              const videoResult = await generateVideo(message.manimCode, messageId, audioPath);
+              
+              // Pass the narration audio file to video generation
+              const narrationAudioPath = message.narrationAudioFile || null;
+              const videoResult = await generateVideo(message.manimCode, messageId, narrationAudioPath);
               
               if (videoResult && videoResult.success) {
                 generatedVideos.push(videoResult.videoPath);
@@ -556,6 +694,9 @@ class SimpleMessageScene(Scene):
 
 // Serve generated videos
 app.use('/videos', express.static(path.join(process.cwd(), '../uploads/videos')));
+
+// Serve audio files for avatar synchronization
+app.use('/audio', express.static(path.join(process.cwd(), 'audios')));
 
 // Health check for manim worker
 app.get('/worker-status', async (req, res) => {

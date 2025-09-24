@@ -34,7 +34,7 @@ AUTO_FALLBACK_TO_TEXT = True  # Automatically replace LaTeX with Text when LaTeX
 class ManimRequest(BaseModel):
     manimCode: str
     messageId: str = None
-    audioPath: str = None
+    narrationAudio: str = None  # Path to narration audio file
 
 class CombineVideosRequest(BaseModel):
     videoPaths: list[str]
@@ -527,65 +527,54 @@ async def generate_video(request: ManimRequest):
         generated_video = video_files[0]
         print(f"✅ Video generated: {generated_video}")
         
-        # Process audio if provided
+        # Handle narration audio embedding if provided
         final_filename = f"video_{request_id}.mp4"
         final_path = OUTPUT_DIR / final_filename
         
-        if request.audioPath and Path(request.audioPath).exists():
-            print(f"🎵 Adding audio from: {request.audioPath}")
-            progress_tracker[request_id] = "Adding audio to video..."
+        if request.narrationAudio and FFMPEG_AVAILABLE:
+            print(f"🎵 Embedding narration audio: {request.narrationAudio}")
+            progress_tracker[request_id] = "Embedding narration audio..."
             
-            # Use FFmpeg to combine video and audio
-            audio_path = Path(request.audioPath)
-            if audio_path.is_absolute():
-                audio_file = audio_path
-            else:
-                # Relative path - resolve from backend directory
-                backend_dir = Path(__file__).parent.parent / "backend"
-                audio_file = backend_dir / audio_path
-            
-            if audio_file.exists():
-                # Combine video and audio with FFmpeg
-                ffmpeg_cmd = [
-                    "ffmpeg",
-                    "-i", str(generated_video),
-                    "-i", str(audio_file),
-                    "-c:v", "copy",  # Copy video stream
-                    "-c:a", "aac",   # Encode audio to AAC
-                    "-shortest",     # Match shortest stream duration
-                    "-y",            # Overwrite output
+            # Copy narration audio to temp directory for processing
+            narration_path = Path(request.narrationAudio)
+            if narration_path.exists():
+                temp_audio = temp_dir / "narration.mp3"
+                shutil.copy2(narration_path, temp_audio)
+                
+                # Use FFmpeg to combine video with narration audio
+                cmd_audio = [
+                    "ffmpeg", "-y",
+                    "-i", str(generated_video),  # Video input
+                    "-i", str(temp_audio),       # Audio input
+                    "-c:v", "copy",              # Copy video stream
+                    "-c:a", "aac",               # Encode audio as AAC
+                    "-map", "0:v:0",             # Map video from first input
+                    "-map", "1:a:0",             # Map audio from second input
+                    "-shortest",                 # End when shortest stream ends
                     str(final_path)
                 ]
                 
-                print(f"🎵 Running FFmpeg command: {' '.join(ffmpeg_cmd)}")
+                print(f"🔄 Embedding audio: {' '.join(cmd_audio)}")
                 
-                try:
-                    ffmpeg_result = subprocess.run(
-                        ffmpeg_cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=60
-                    )
-                    
-                    if ffmpeg_result.returncode != 0:
-                        print(f"⚠️ FFmpeg failed, copying video without audio")
-                        print(f"FFmpeg error: {ffmpeg_result.stderr}")
-                        shutil.copy2(generated_video, final_path)
-                    else:
-                        print(f"✅ Audio added successfully")
-                        
-                except subprocess.TimeoutExpired:
-                    print(f"⚠️ FFmpeg timed out, copying video without audio")
+                audio_result = subprocess.run(
+                    cmd_audio,
+                    capture_output=True,
+                    text=True,
+                    timeout=60  # 1 minute timeout for audio embedding
+                )
+                
+                if audio_result.returncode != 0:
+                    print(f"⚠️ Audio embedding failed: {audio_result.stderr}")
+                    # Fall back to video without audio
                     shutil.copy2(generated_video, final_path)
-                except Exception as e:
-                    print(f"⚠️ Error adding audio: {e}, copying video without audio")
-                    shutil.copy2(generated_video, final_path)
+                else:
+                    print(f"✅ Successfully embedded narration audio")
             else:
-                print(f"⚠️ Audio file not found: {audio_file}, copying video without audio")
+                print(f"⚠️ Narration audio file not found: {request.narrationAudio}")
+                # Fall back to video without audio
                 shutil.copy2(generated_video, final_path)
         else:
-            # No audio provided, just copy the video
-            print(f"📹 No audio provided, copying video only")
+            # No audio to embed or FFmpeg not available
             shutil.copy2(generated_video, final_path)
         
         # Generate URL for accessing the video

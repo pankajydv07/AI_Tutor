@@ -11,6 +11,7 @@ export const UI = ({ hidden, showControls = true, showChat = true, ...props }) =
   const [isVideoMode, setIsVideoMode] = useState(false); // Default to Chat mode
   const [willCreateVideo, setWillCreateVideo] = useState(false); // Toggle for video creation
   const [expandedVideo, setExpandedVideo] = useState(null);
+  const [expandedVideoSessionId, setExpandedVideoSessionId] = useState(null);
   const recognition = useRef(null);
 
   // Initialize Web Speech API
@@ -26,10 +27,7 @@ export const UI = ({ hidden, showControls = true, showChat = true, ...props }) =
         const transcript = event.results[0][0].transcript;
         input.current.value = transcript;
         setIsListening(false);
-        if (transcript && !loading && !message) {
-          chat(transcript, isVideoMode);
-          input.current.value = "";
-        }
+        // Don't auto-send, let user choose Text Only or Create Video
       };
 
       recognition.current.onerror = (event) => {
@@ -53,13 +51,15 @@ export const UI = ({ hidden, showControls = true, showChat = true, ...props }) =
     }
   };
 
-  const handleVideoExpand = (videoUrl) => {
+  const handleVideoExpand = (videoUrl, sessionId) => {
     setExpandedVideo(videoUrl);
+    setExpandedVideoSessionId(sessionId);
     setIsVideoMode(true);
   };
 
   const handleVideoClose = () => {
     setExpandedVideo(null);
+    setExpandedVideoSessionId(null);
     setIsVideoMode(false);
   };
 
@@ -221,6 +221,7 @@ export const UI = ({ hidden, showControls = true, showChat = true, ...props }) =
             {isVideoMode ? (
               <VideoPage
                 videoUrl={expandedVideo}
+                sessionId={expandedVideoSessionId}
                 onClose={handleVideoClose}
               />
             ) : (
@@ -269,7 +270,8 @@ export const UI = ({ hidden, showControls = true, showChat = true, ...props }) =
                           <div className="mt-3">
                             <InlineVideoPlayer
                               src={msg.videoUrl}
-                              onExpand={() => handleVideoExpand(msg.videoUrl)}
+                              onExpand={() => handleVideoExpand(msg.videoUrl, msg.sessionId)}
+                              sessionId={msg.sessionId}
                             />
                             <p className="text-xs text-gray-400 mt-1">📹 Educational Video</p>
                           </div>

@@ -1,34 +1,67 @@
 import { useRef, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { useChat } from '../hooks/useChat';
 
-export const InlineVideoPlayer = ({ src, onExpand }) => {
+export const InlineVideoPlayer = ({ src, onExpand, sessionId }) => {
   const videoRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
   const [showVolumeControl, setShowVolumeControl] = useState(false);
+  
+  const { handleVideoPlay, handleVideoPause, handleVideoSeek, handleVideoEnd } = useChat();
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
-    const updateTime = () => setCurrentTime(video.currentTime);
+    const updateTime = () => {
+      setCurrentTime(video.currentTime);
+      if (sessionId) {
+        handleVideoSeek(sessionId, video.currentTime);
+      }
+    };
     const updateDuration = () => setDuration(video.duration);
-    const handlePlayPause = () => setIsPlaying(!video.paused);
+    const handlePlayPause = () => {
+      setIsPlaying(!video.paused);
+      if (sessionId) {
+        if (video.paused) {
+          handleVideoPause(sessionId);
+        } else {
+          handleVideoPlay(sessionId);
+        }
+      }
+    };
+    const handleEnded = () => {
+      setIsPlaying(false);
+      if (sessionId) {
+        handleVideoEnd(sessionId);
+      }
+    };
+    const handleSeeking = () => {
+      if (sessionId) {
+        console.log(`🔍 Video seeking to: ${video.currentTime}s`);
+        handleVideoSeek(sessionId, video.currentTime);
+      }
+    };
 
     video.addEventListener('timeupdate', updateTime);
     video.addEventListener('loadedmetadata', updateDuration);
     video.addEventListener('play', handlePlayPause);
     video.addEventListener('pause', handlePlayPause);
+    video.addEventListener('ended', handleEnded);
+    video.addEventListener('seeking', handleSeeking);
 
     return () => {
       video.removeEventListener('timeupdate', updateTime);
       video.removeEventListener('loadedmetadata', updateDuration);
       video.removeEventListener('play', handlePlayPause);
       video.removeEventListener('pause', handlePlayPause);
+      video.removeEventListener('ended', handleEnded);
+      video.removeEventListener('seeking', handleSeeking);
     };
-  }, []);
+  }, [sessionId, handleVideoPlay, handleVideoPause, handleVideoSeek, handleVideoEnd]);
 
   const togglePlay = () => {
     if (videoRef.current.paused) {
@@ -42,6 +75,10 @@ export const InlineVideoPlayer = ({ src, onExpand }) => {
     const time = e.target.value;
     videoRef.current.currentTime = time;
     setCurrentTime(time);
+    if (sessionId) {
+      console.log(`⏭️ Manual seek to: ${time}s`);
+      handleVideoSeek(sessionId, time);
+    }
   };
 
   const handleVolumeChange = (e) => {
@@ -73,6 +110,8 @@ export const InlineVideoPlayer = ({ src, onExpand }) => {
           src={src}
           className="w-full rounded-t-lg"
           onClick={togglePlay}
+          preload="metadata"
+          playsInline
         >
           Your browser does not support the video tag.
         </video>
