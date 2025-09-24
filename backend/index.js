@@ -485,6 +485,7 @@ app.post("/chat", async (req, res) => {
       } else {
         messages = JSON.parse(responseContent);
       }
+      console.log("Parsed messages from AI:", JSON.stringify(messages, null, 2));
     } catch (parseError) {
       console.error("JSON Parse Error:", parseError.message);
       console.error("Response structure:", response);
@@ -512,8 +513,15 @@ app.post("/chat", async (req, res) => {
 
     // Validate messages array
     if (!Array.isArray(messages) || messages.length > 5 || messages.length === 0) {
+      console.log("Invalid messages array:", {
+        isArray: Array.isArray(messages),
+        length: messages ? messages.length : 'undefined',
+        messages: messages
+      });
       throw new Error("Invalid messages format or incorrect number of messages");
     }
+    
+    console.log(`📝 Processing ${messages.length} message(s) in ${videoMode ? 'video' : 'chat'} mode`);
 
     // Ensure audios directory exists
     try {
@@ -538,13 +546,39 @@ app.post("/chat", async (req, res) => {
       // Handle video mode vs regular mode structure
       let textForAudio, textForChat;
       if (videoMode) {
-        // Allow empty chatResponse for multi-part videos (only first part needs chat response)
-        if (message.chatResponse === undefined || message.videoExplanation === undefined || 
-            !message.facialExpression || !message.animation) {
-          throw new Error(`Invalid video mode message format at index ${i}: missing required fields`);
+        // Validate and fix missing fields for video mode
+        const missingFields = [];
+        
+        if (message.chatResponse === undefined || message.chatResponse === null) {
+          missingFields.push('chatResponse');
+          message.chatResponse = i === 0 ? "Here's your video explanation!" : ""; // Default for first message
         }
-        if (!message.manimCode) {
-          throw new Error(`Missing manimCode for video mode at index ${i}`);
+        
+        if (message.videoExplanation === undefined || message.videoExplanation === null) {
+          missingFields.push('videoExplanation');
+          message.videoExplanation = "Let me explain this concept step by step."; // Default explanation
+        }
+        
+        if (!message.facialExpression) {
+          missingFields.push('facialExpression');
+          message.facialExpression = "smile"; // Default expression
+        }
+        
+        if (!message.animation) {
+          missingFields.push('animation');
+          message.animation = "Talking_0"; // Default animation
+        }
+        
+        if (!message.manimCode || message.manimCode.trim() === '') {
+          missingFields.push('manimCode');
+          console.log(`Message at index ${i}:`, JSON.stringify(message, null, 2));
+          console.log(`Missing/empty manimCode - this is critical for video generation`);
+          throw new Error(`Missing or empty manimCode for video mode at index ${i}`);
+        }
+        
+        if (missingFields.length > 0) {
+          console.log(`⚠️ Fixed missing fields at index ${i}:`, missingFields);
+          console.log(`Original message:`, JSON.stringify(message, null, 2));
         }
         textForAudio = message.videoExplanation; // Use video explanation for speech synthesis
         textForChat = message.chatResponse || `Part ${i + 1} of video explanation`; // Fallback for empty chat response

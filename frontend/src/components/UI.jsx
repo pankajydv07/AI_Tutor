@@ -45,7 +45,7 @@ export const UI = ({ hidden, showControls = true, showChat = true, ...props }) =
 
   const sendMessage = () => {
     const text = input.current.value;
-    if (!loading && !message && text.trim()) {
+    if (!loading && text.trim()) {
       chat(text, willCreateVideo);
       input.current.value = "";
     }
@@ -363,17 +363,17 @@ export const UI = ({ hidden, showControls = true, showChat = true, ...props }) =
               className={`flex items-center justify-center bg-gray-800 hover:bg-gray-700 text-white p-4 rounded-xl transition-all duration-300 ${
                 isListening ? "ring-2 ring-pink-500/50 bg-gray-700" : ""
               }`}
-              disabled={loading || message}
+              disabled={loading}
             >
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
               </svg>
             </button>
             <button
-              disabled={loading || message || isListening}
+              disabled={loading || isListening}
               onClick={sendMessage}
               className={`bg-pink-600 hover:bg-pink-500 text-white px-6 p-4 rounded-xl font-medium transition-all duration-300 ${
-                loading || message || isListening ? "opacity-50 cursor-not-allowed" : ""
+                loading || isListening ? "opacity-50 cursor-not-allowed" : ""
               }`}
             >
               Send

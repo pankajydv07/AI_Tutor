@@ -1,0 +1,10 @@
+{
+  "metadata": {
+    "soundFile": "D:\\SIH 2025\\SIH\\3DAvatarSih\\backend\\audios\\video_narration_session_1758687699702_3yp9ic1bq.wav",
+    "duration": 0.26
+  },
+  "mouthCues": [
+    { "start": 0.00, "end": 0.11, "value": "B" },
+    { "start": 0.11, "end": 0.26, "value": "X" }
+  ]
+}

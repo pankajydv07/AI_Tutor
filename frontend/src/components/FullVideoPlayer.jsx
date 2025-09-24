@@ -10,6 +10,7 @@ export const FullVideoPlayer = ({ src, onClose, sessionId }) => {
   const [volume, setVolume] = useState(1);
   const [showVolumeControl, setShowVolumeControl] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showShareMenu, setShowShareMenu] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [quality, setQuality] = useState('auto');
   
@@ -66,6 +67,18 @@ export const FullVideoPlayer = ({ src, onClose, sessionId }) => {
     };
   }, [sessionId, handleVideoPlay, handleVideoPause, handleVideoSeek, handleVideoEnd]);
 
+  // Close share dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showShareMenu && !event.target.closest('.share-dropdown')) {
+        setShowShareMenu(false);
+      }
+    };
+
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [showShareMenu]);
+
   const togglePlay = () => {
     if (videoRef.current.paused) {
       videoRef.current.play();
@@ -115,6 +128,17 @@ export const FullVideoPlayer = ({ src, onClose, sessionId }) => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setShowShareMenu(false);
+  };
+
+  const handleCommunityShare = () => {
+    // Add community sharing logic here
+    console.log('Sharing to community...');
+    setShowShareMenu(false);
+  };
+
+  const handleShare = () => {
+    setShowShareMenu(!showShareMenu);
   };
 
   return (
@@ -275,17 +299,48 @@ export const FullVideoPlayer = ({ src, onClose, sessionId }) => {
               </AnimatePresence>
             </div>
 
-            {/* Download Button */}
-            <motion.button
-              className="p-2 hover:bg-white/10 rounded-lg transition-colors"
-              onClick={handleDownload}
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-            </motion.button>
+            {/* Share Button */}
+            <div className="relative share-dropdown">
+              <motion.button
+                className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+                onClick={handleShare}
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.367 2.684 3 3 0 00-5.367-2.684z" />
+                </svg>
+              </motion.button>
+              <AnimatePresence>
+                {showShareMenu && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    className="absolute bottom-full right-0 mb-2 p-2 bg-gray-800/90 backdrop-blur-sm rounded-lg shadow-lg min-w-[140px]"
+                  >
+                    <button
+                      onClick={handleCommunityShare}
+                      className="w-full px-3 py-2 text-left text-white text-sm hover:bg-gray-700/50 rounded-lg transition-colors flex items-center gap-2"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                      </svg>
+                      Community
+                    </button>
+                    <button
+                      onClick={handleDownload}
+                      className="w-full px-3 py-2 text-left text-white text-sm hover:bg-gray-700/50 rounded-lg transition-colors flex items-center gap-2"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                      Download
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
 
             {/* Close Button */}
             <motion.button
