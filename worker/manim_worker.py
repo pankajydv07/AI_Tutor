@@ -235,16 +235,40 @@ async def generate_video(request: ManimRequest):
         # Write the Manim code to a temporary file
         script_file = temp_dir / "scene.py"
         
-        # Ensure the code has proper structure
+        # Ensure the code has proper structure and imports
         manim_code = request.manimCode.strip()
-        if not manim_code.startswith("from manim import"):
-            manim_code = "from manim import *\nfrom math import *\n\n" + manim_code
+        
+        # Always add required imports at the beginning (avoid duplicates)
+        required_imports = [
+            "from manim import *",
+            "from math import *", 
+            "import random",
+            "import numpy as np"
+        ]
+        
+        # Remove any existing import lines to avoid conflicts
+        code_lines = manim_code.split('\n')
+        filtered_lines = []
+        for line in code_lines:
+            line_stripped = line.strip()
+            if not (line_stripped.startswith('from manim import') or 
+                   line_stripped.startswith('from math import') or
+                   line_stripped.startswith('import random') or
+                   line_stripped.startswith('import numpy')):
+                filtered_lines.append(line)
+        
+        # Combine imports with cleaned code
+        manim_code = '\n'.join(required_imports) + '\n\n' + '\n'.join(filtered_lines)
         
         # Write the code to file
         with open(script_file, 'w', encoding='utf-8') as f:
             f.write(manim_code)
         
         print(f"📄 Script written to: {script_file}")
+        print(f"🔍 First 10 lines of generated script:")
+        lines = manim_code.split('\n')
+        for i, line in enumerate(lines[:10]):
+            print(f"   {i+1}: {line}")
         
         progress_tracker[request_id] = "Rendering video with Manim..."
         

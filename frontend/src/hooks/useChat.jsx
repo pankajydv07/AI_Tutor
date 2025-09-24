@@ -10,6 +10,13 @@ export const ChatProvider = ({ children }) => {
   
   const chat = async (message, videoMode = false) => {
     setLoading(true);
+    
+    // Prepare chat history for context (last 10 messages to avoid token limit)
+    const recentHistory = chatHistory.slice(-10).map(msg => ({
+      role: msg.type === 'user' ? 'user' : 'assistant',
+      content: msg.text
+    }));
+    
     // Add user message to chat history immediately
     setChatHistory(prev => [...prev, { type: 'user', text: message }]);
     
@@ -21,7 +28,12 @@ export const ChatProvider = ({ children }) => {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ message, videoMode, sessionId }),
+      body: JSON.stringify({ 
+        message, 
+        videoMode, 
+        sessionId,
+        chatHistory: recentHistory // Include recent chat history for context
+      }),
     });
     const response = await data.json();
     const resp = response.messages;
