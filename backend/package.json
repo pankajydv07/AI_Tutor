@@ -6,11 +6,11 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js --ext js"
+    "pankaj": "nodemon index.js --ext js"
   },
   "author": "Ujjawal Pandey.dev>",
   "dependencies": {
-    "@google-cloud/text-to-speech": "^6.3.0",
+    "@google-cloud/text-to-speech": "^6.4.0",
     "@google/generative-ai": "^0.24.1",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",

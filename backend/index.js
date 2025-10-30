@@ -1,13 +1,13 @@
 import { exec } from "child_process";
 import cors from "cors";
 import dotenv from "dotenv";
-import { ElevenLabsClient } from "elevenlabs";
 import express from "express";
 import { promises as fs } from "fs";
 import fetch from "node-fetch";
 import OpenAI from "openai";
 import path from "path";
 import { promisify } from "util";
+import { TextToSpeechClient } from "@google-cloud/text-to-speech";
 
 // Convert exec to use promises
 const execPromise = promisify(exec);
@@ -20,13 +20,29 @@ const qwenClient = new OpenAI({
   apiKey: process.env.NEBIUS_API_KEY,
 });
 
-const elevenLabsApiKey = process.env.ELEVEN_LABS_API_KEY;
-const voiceID = "9BWtsMINqrJLrRacOk9x";
+// Initialize Google Cloud Text-to-Speech client
+let googleTtsClient = null;
+const initializeGoogleTTS = async () => {
+  try {
+    // Initialize with credentials from environment or file
+    if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      googleTtsClient = new TextToSpeechClient();
+      console.log("✅ Google Cloud TTS initialized with service account");
+    } else if (process.env.GOOGLE_TTS_CREDENTIALS) {
+      // Parse JSON credentials from environment variable
+      const credentials = JSON.parse(process.env.GOOGLE_TTS_CREDENTIALS);
+      googleTtsClient = new TextToSpeechClient({ credentials });
+      console.log("✅ Google Cloud TTS initialized with JSON credentials");
+    } else {
+      console.warn("⚠️ Google Cloud TTS credentials not found. Please set GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_TTS_CREDENTIALS");
+    }
+  } catch (error) {
+    console.error("❌ Failed to initialize Google Cloud TTS:", error.message);
+  }
+};
 
-// Initialize ElevenLabs client
-const elevenlabs = new ElevenLabsClient({
-  apiKey: elevenLabsApiKey,
-});
+// Initialize Google TTS on startup
+initializeGoogleTTS();
 
 const app = express();
 app.use(express.json());
@@ -81,29 +97,83 @@ const lipSyncMessage = async (messageIndex) => {
   }
 };
 
-// Function to generate speech and save to file
+// Function to generate speech and save to file using Google Cloud TTS
 const generateSpeech = async (text, fileName) => {
   try {
     console.log(`Generating speech for: ${text}`);
-    const audio = await elevenlabs.generate({
-      voice: voiceID,
-      text: text,
-      model_id: "eleven_multilingual_v2",
-    });
     
-    // Convert audio stream to buffer
-    const chunks = [];
-    for await (const chunk of audio) {
-      chunks.push(chunk);
+    if (!googleTtsClient) {
+      throw new Error("Google Cloud TTS client not initialized. Please check credentials.");
     }
-    const buffer = Buffer.concat(chunks);
+
+    const request = {
+      input: { text: text },
+      voice: {
+        languageCode: 'en-US',
+        name: 'en-US-Wavenet-F', // Female voice, similar to previous setup
+        ssmlGender: 'FEMALE',
+      },
+      audioConfig: {
+        audioEncoding: 'MP3',
+        speakingRate: 1.0,
+        pitch: 0.0,
+        volumeGainDb: 0.0,
+      },
+    };
+
+    const [response] = await googleTtsClient.synthesizeSpeech(request);
     
     // Save to file
-    await fs.writeFile(fileName, buffer);
+    await fs.writeFile(fileName, response.audioContent, 'binary');
     console.log(`Audio saved to ${fileName}`);
     return fileName;
   } catch (error) {
     console.error(`Error generating speech: ${error.message}`);
+    throw error;
+  }
+};
+
+// Helper to process a simple array of messages through the audio pipeline
+// Generates TTS audio + lip-sync JSON for each message and attaches
+// `audio` (base64) and `lipsync` fields to each message object.
+const processMessages = async (messagesArray) => {
+  try {
+    // Ensure audios directory exists
+    await fs.mkdir("audios", { recursive: true });
+
+    for (let i = 0; i < messagesArray.length; i++) {
+      const msg = messagesArray[i];
+      // Prefer text/chatResponse/videoExplanation in that order
+      const text = msg.text || msg.chatResponse || msg.videoExplanation || "(no text)";
+      const fileName = `audios/message_${i}.mp3`;
+
+      console.log(`processMessages: generating speech for fallback message ${i}`);
+      await generateSpeech(text, fileName);
+
+      // Generate lip-sync JSON for this audio
+      try {
+        await lipSyncMessage(i);
+      } catch (lsErr) {
+        console.warn(`processMessages: lip-sync failed for message ${i}:`, lsErr.message);
+      }
+
+      // Attach audio (base64) and lipsync JSON if present
+      try {
+        msg.audio = await audioFileToBase64(fileName);
+      } catch (e) {
+        console.warn(`processMessages: failed to read audio file ${fileName}:`, e.message);
+      }
+
+      try {
+        msg.lipsync = await readJsonTranscript(`audios/message_${i}.json`);
+      } catch (e) {
+        console.warn(`processMessages: failed to read lipsync for message ${i}:`, e.message);
+      }
+    }
+
+    return messagesArray;
+  } catch (error) {
+    console.error("processMessages error:", error.message);
     throw error;
   }
 };
@@ -114,21 +184,8 @@ const generateVideoNarrationAudio = async (videoExplanationText, sessionId) => {
     const fileName = `audios/video_narration_${sessionId}.mp3`;
     console.log(`🎵 Generating video narration audio: ${fileName}`);
     
-    const audio = await elevenlabs.generate({
-      voice: voiceID,
-      text: videoExplanationText,
-      model_id: "eleven_multilingual_v2",
-    });
-    
-    // Convert audio stream to buffer
-    const chunks = [];
-    for await (const chunk of audio) {
-      chunks.push(chunk);
-    }
-    const buffer = Buffer.concat(chunks);
-    
-    // Save to file
-    await fs.writeFile(fileName, buffer);
+    // Use the same generateSpeech function which now uses Google Cloud TTS
+    await generateSpeech(videoExplanationText, fileName);
     console.log(`✅ Video narration audio saved: ${fileName}`);
     
     // Generate lip-sync data for avatar
@@ -275,7 +332,14 @@ app.post("/chat", async (req, res) => {
     }
   }
 
-  if (!elevenLabsApiKey || !process.env.NEBIUS_API_KEY || process.env.NEBIUS_API_KEY === "-") {
+  const hasGoogleTTSCredentials = googleTtsClient !== null;
+  const hasNebius = process.env.NEBIUS_API_KEY && process.env.NEBIUS_API_KEY !== "-";
+  
+  if (!hasGoogleTTSCredentials || !hasNebius) {
+    console.error("❌ Missing API Keys/Credentials:");
+    console.error("  Google Cloud TTS:", hasGoogleTTSCredentials ? "✅ Configured" : "❌ Missing");
+    console.error("  NEBIUS_API_KEY:", hasNebius ? "✅ Set" : "❌ Missing");
+    
     try {
       res.send({
         messages: [
@@ -287,7 +351,7 @@ app.post("/chat", async (req, res) => {
             animation: "Angry",
           },
           {
-            text: "You don't want to ruin Wawa Sensei with a crazy Qwen and ElevenLabs bill, right?",
+            text: "You need Google Cloud TTS credentials and Nebius API key configured properly!",
             audio: await audioFileToBase64("audios/api_1.wav"),
             lipsync: await readJsonTranscript("audios/api_1.json"),
             facialExpression: "smile",
@@ -298,7 +362,9 @@ app.post("/chat", async (req, res) => {
       return;
     } catch (error) {
       console.error("Error sending API key error messages:", error.message);
-      res.status(500).send({ error: "Failed to load API key error messages" });
+      res.status(500).send({ 
+        error: "Missing credentials. Please check Google Cloud TTS credentials and NEBIUS_API_KEY configuration." 
+      });
       return;
     }
   }
@@ -314,7 +380,7 @@ app.post("/chat", async (req, res) => {
           {
             role: "system",
             content: videoMode 
-              ? `You are an intelligent educational assistant that creates comprehensive Manim voiceover animations for learning. You MUST generate TWO types of content: 1. CHAT RESPONSE: A concise, friendly text response for the chat history (10-50 words) 2. VIDEO EXPLANATION: A detailed narration script that explains what happens in the video. ⚠️ CRITICAL LATEX SAFETY RULE: ALWAYS use raw strings for mathematical content: ✅ MathTex(r\"x \\\\\\\\approx -0.37\") - CORRECT ❌ MathTex(\"x \\\\\\\\approx -0.37\") - WILL BREAK LaTeX. Use r\"\" prefix for ALL MathTex/Tex content to prevent escaping corruption. IMPORTANT: The chat response and video explanation serve different purposes: - Chat response: Shows in chat history, answers the user's question directly - Video explanation: Narrates and describes the visual content in the generated video. INTELLIGENT VIDEO STRATEGY: Analyze the user's question and determine the optimal video approach based on content length and scene types. SPLITTING CRITERIA: - Split ONLY when explanation involves fundamentally different approaches/scenes - Each part must be at least 15 seconds of content - Examples of valid splits: * Algebraic derivation + Geometric proof * Theory explanation + Practical application * Definition + Multiple examples * Historical context + Modern application. SINGLE VIDEO APPROACH (Preferred when possible): - Mathematical derivations that follow one logical flow - Simple concept explanations - Single proof demonstrations - Basic function/equation explanations. MULTI-PART APPROACH (Only when content naturally divides): - Complex topics with different methodologies - Topics requiring both abstract and concrete examples - Historical + modern perspectives - Theory + multiple applications. CONTENT LENGTH REQUIREMENTS: - Each video part must contain at least 15 seconds of meaningful content - Single videos should be 15-30 seconds - Multi-part videos: each part 15-25 seconds - Use proper pacing with strategic self.wait() statements. MANIM CODE STRUCTURE (Based on proven educational patterns): 1. ALWAYS start with: from manim import * 2. Use Scene class (not VoiceoverScene): class DescriptiveClassName(Scene): 3. NO voiceover methods - audio handled separately by backend system 4. DO NOT use self.voiceover() or VoiceoverScene - will cause errors 5. Use proper timing with self.wait() and run_time parameters for pacing. FULL MANIM CAPABILITIES (Educational Math Focus): - Mathematical expressions: MathTex(), Tex() for LaTeX formulas - Text elements: Text() for plain text, with font_size parameter - Geometric shapes: Circle(), Square(), Rectangle(), Polygon(), Arc() - Mathematical graphs: Axes(), NumberPlane(), get_graph(), plot() - Complex elements: ImageMobject(), Brace(), SurroundingRectangle() - Positioning: .next_to(), .to_edge(), .to_corner(), .shift(), .move_to() - Colors: BLUE, RED, GREEN, YELLOW, WHITE, PINK, ORANGE, PURPLE, GREY - Animations: Create(), Write(), FadeIn(), FadeOut(), Transform(), ReplacementTransform() - Special effects: Flash(), Indicate(), Circumscribe(), ApplyWave() - Movement: MoveAlongPath(), .animate.shift(), .animate.scale(). SCREEN MANAGEMENT & VISIBILITY RULES: 6. Monitor screen space - when content gets crowded, use screen management techniques 7. CLEAR SCREEN: Use self.clear() to start fresh when screen becomes full 8. SLIDE CONTENT: Use .animate.shift() to move existing content up/down when adding new elements 9. FADE TRANSITIONS: Use FadeOut() old content, then FadeIn() new content for clean transitions 10. SCALE ELEMENTS: Use smaller font sizes or .scale() for complex content to fit properly 11. POSITIONING STRATEGY: Use .to_edge(), .to_corner() for systematic element placement 12. GROUP MANAGEMENT: Use VGroup to move related elements together when repositioning. EDUCATIONAL STORYTELLING PATTERNS: - Start with engaging introduction/context - Build concepts gradually with visual support - Use analogies and real-world connections - Include step-by-step derivations for math - Show multiple perspectives when helpful - End with applications or summary - Use encouraging, accessible language. TIMING AND PACING GUIDELINES: - Each animation sequence should be substantial (15+ seconds) - Use self.wait() between major concept transitions - Time animations appropriately with run_time parameters - Include pauses for comprehension: self.wait(1) or self.wait(2) - Audio narration will be added automatically by the system. VISIBILITY CODE PATTERNS: # Slide existing content up when adding new existing_group = VGroup(title, eq1, eq2) self.play(existing_group.animate.shift(UP*1.5)) new_equation = MathTex(r\"New step\").shift(DOWN*2) self.play(Write(new_equation)) # Clear screen for fresh start self.play(FadeOut(*self.mobjects)) self.wait(0.5) # Start fresh with new content # Mathematical graph example axes = Axes(x_range=[-3, 3, 1], y_range=[-1, 5, 1]) graph = axes.plot(lambda x: x**2, color=BLUE) self.play(Create(axes), Create(graph)) self.wait(2). EXAMPLE DECISION PROCESS: \"Explain (a+b)²\": DECISION: Single video (one logical flow from geometry to algebra) CONTENT: Geometric square setup → division → labeling → algebraic transition → final formula. \"Prove Pythagorean theorem\": DECISION: Two parts (different proof approaches) PART 1: Geometric proof with squares on sides PART 2: Algebraic proof with coordinate geometry. \"Explain quadratic functions\": DECISION: Two parts (theory vs applications) PART 1: Basic form, vertex, parabola shape, transformations PART 2: Real-world applications and problem solving. CLASS NAMING: Use descriptive names like QuadraticExplanation, PythagoreanTheorem, AdditionExample, etc. RESPONSE FORMAT: For single comprehensive explanation: [ { \"chatResponse\": \"Brief, friendly answer for chat history (10-50 words)\", \"videoExplanation\": \"Detailed narration explaining what the viewer sees in the video\", \"facialExpression\": \"smile\", \"animation\": \"Talking_0\", \"manimCode\": \"Complete scene with full content (15+ seconds of animation)\" } ] For multi-part explanation (only when content naturally divides): [ { \"chatResponse\": \"Brief, friendly answer covering the topic (10-50 words)\", \"videoExplanation\": \"Detailed narration for the first part of the video\", \"facialExpression\": \"smile\", \"animation\": \"Talking_0\", \"manimCode\": \"Complete first scene (15+ seconds)\" }, { \"chatResponse\": \"\", \"videoExplanation\": \"Detailed narration for the second part of the video\", \"facialExpression\": \"default\", \"animation\": \"Talking_1\", \"manimCode\": \"Complete second scene (15+ seconds)\" } ]. CONTENT DENSITY REQUIREMENTS: Each scene must include enough elements and animations to fill 15+ seconds: - Multiple animation steps with proper timing - Gradual building of complexity - Clear transitions between concepts - Sufficient wait times for comprehension - Rich visual elements and transformations - Well-paced educational content. CRITICAL: Only create multiple parts when content naturally requires different scene types or approaches. Default to comprehensive single videos for most explanations.`
+              ? "You are an intelligent educational assistant that creates comprehensive Manim voiceover animations for learning. You have access to chat history from previous conversations to provide contextually aware and personalized educational content.\n\nCHAT HISTORY INTEGRATION:\n- Analyze previous conversations to understand the user's learning progress, preferences, and areas of difficulty\n- Reference prior explanations to build upon previously covered concepts\n- Adapt complexity level based on user's demonstrated understanding from chat history\n- Maintain continuity in teaching approach and terminology used in previous sessions\n- If user asks follow-up questions, connect them to previously explained concepts\n- For returning topics, acknowledge prior coverage and offer deeper exploration or alternative perspectives\n\nYou MUST generate TWO types of content:\n1. CHAT RESPONSE: A concise, friendly text response for the chat history (10-50 words)\n2. VIDEO EXPLANATION: A detailed narration script that explains what happens in the video\n\n⚠️ CRITICAL LATEX SAFETY RULE: ALWAYS use raw strings for mathematical content:\n✅ MathTex(r\"x \\\\approx -0.37\") - CORRECT\n❌ MathTex(\"x \\\\approx -0.37\") - WILL BREAK LaTeX. Use r\"\" prefix for ALL MathTex/Tex content to prevent escaping corruption.\n\nIMPORTANT: The chat response and video explanation serve different purposes:\n- Chat response: Shows in chat history, answers the user's question directly, references prior learning when relevant\n- Video explanation: Narrates and describes the visual content in the generated video\n\nINTELLIGENT VIDEO STRATEGY:\nAnalyze the user's question and determine the optimal video approach based on content length and scene types.\n\nSPLITTING CRITERIA:\n- Split ONLY when explanation involves fundamentally different approaches/scenes\n- Each part must be at least 15 seconds of content\n- Examples of valid splits:\n  * Algebraic derivation + Geometric proof\n  * Theory explanation + Practical application\n  * Definition + Multiple examples\n  * Historical context + Modern application\n\nSINGLE VIDEO APPROACH (Preferred when possible):\n- Mathematical derivations that follow one logical flow\n- Simple concept explanations\n- Single proof demonstrations\n- Basic function/equation explanations\n\nMULTI-PART APPROACH (Only when content naturally divides):\n- Complex topics with different methodologies\n- Topics requiring both abstract and concrete examples\n- Historical + modern perspectives\n- Theory + multiple applications\n\nCONTENT LENGTH REQUIREMENTS:\n- Each video part must contain at least 15 seconds of meaningful content\n- Single videos should be 15-30 seconds\n- Multi-part videos: each part 15-25 seconds\n- Use proper pacing with strategic self.wait() statements\n\nMANIM CODE STRUCTURE (Based on proven educational patterns):\n1. ALWAYS start with: from manim import *\n2. Use Scene class (not VoiceoverScene): class DescriptiveClassName(Scene):\n3. NO voiceover methods - audio handled separately by backend system\n4. DO NOT use self.voiceover() or VoiceoverScene - will cause errors\n5. Use proper timing with self.wait() and run_time parameters for pacing\n\nFULL MANIM CAPABILITIES (Educational Math Focus):\n- Mathematical expressions: MathTex(), Tex() for LaTeX formulas\n- Text elements: Text() for plain text, with font_size parameter\n- Geometric shapes: Circle(), Square(), Rectangle(), Polygon(), Arc()\n- Mathematical graphs: Axes(), NumberPlane(), get_graph(), plot()\n- Complex elements: ImageMobject(), Brace(), SurroundingRectangle()\n- Positioning: .next_to(), .to_edge(), .to_corner(), .shift(), .move_to()\n- Colors: BLUE, RED, GREEN, YELLOW, WHITE, PINK, ORANGE, PURPLE, GREY\n- Animations: Create(), Write(), FadeIn(), FadeOut(), Transform(), ReplacementTransform()\n- Special effects: Flash(), Indicate(), Circumscribe(), ApplyWave()\n- Movement: MoveAlongPath(), .animate.shift(), .animate.scale()\n\nSCREEN MANAGEMENT & VISIBILITY RULES:\n6. Monitor screen space - when content gets crowded, use screen management techniques\n7. CLEAR SCREEN: Use self.clear() to start fresh when screen becomes full\n8. SLIDE CONTENT: Use .animate.shift() to move existing content up/down when adding new elements\n9. FADE TRANSITIONS: Use FadeOut() old content, then FadeIn() new content for clean transitions\n10. SCALE ELEMENTS: Use smaller font sizes or .scale() for complex content to fit properly\n11. POSITIONING STRATEGY: Use .to_edge(), .to_corner() for systematic element placement\n12. GROUP MANAGEMENT: Use VGroup to move related elements together when repositioning\n\nEDUCATIONAL STORYTELLING PATTERNS:\n- Start with engaging introduction/context\n- Build concepts gradually with visual support\n- Use analogies and real-world connections\n- Include step-by-step derivations for math\n- Show multiple perspectives when helpful\n- End with applications or summary\n- Use encouraging, accessible language\n- Reference previous learning when building on prior concepts\n\nTIMING AND PACING GUIDELINES:\n- Each animation sequence should be substantial (15+ seconds)\n- Use self.wait() between major concept transitions\n- Time animations appropriately with run_time parameters\n- Include pauses for comprehension: self.wait(1) or self.wait(2)\n- Audio narration will be added automatically by the system\n\nVISIBILITY CODE PATTERNS:\n# Slide existing content up when adding new\nexisting_group = VGroup(title, eq1, eq2)\nself.play(existing_group.animate.shift(UP*1.5))\nnew_equation = MathTex(r\"New step\").shift(DOWN*2)\nself.play(Write(new_equation))\n\n# Clear screen for fresh start\nself.play(FadeOut(*self.mobjects))\nself.wait(0.5)\n# Start fresh with new content\n\n# Mathematical graph example\naxes = Axes(x_range=[-3, 3, 1], y_range=[-1, 5, 1])\ngraph = axes.plot(lambda x: x**2, color=BLUE)\nself.play(Create(axes), Create(graph))\nself.wait(2)\n\nEXAMPLE DECISION PROCESS:\n\"Explain (a+b)²\":\nDECISION: Single video (one logical flow from geometry to algebra)\nCONTENT: Geometric square setup → division → labeling → algebraic transition → final formula\n\n\"Prove Pythagorean theorem\":\nDECISION: Two parts (different proof approaches)\nPART 1: Geometric proof with squares on sides\nPART 2: Algebraic proof with coordinate geometry\n\n\"Explain quadratic functions\":\nDECISION: Two parts (theory vs applications)\nPART 1: Basic form, vertex, parabola shape, transformations\nPART 2: Real-world applications and problem solving\n\nCLASS NAMING: Use descriptive names like QuadraticExplanation, PythagoreanTheorem, AdditionExample, etc.\n\nRESPONSE FORMAT:\n\nFor single comprehensive explanation:\n[\n  {\n    \"chatResponse\": \"Brief, friendly answer for chat history (10-50 words)\",\n    \"videoExplanation\": \"Detailed narration explaining what the viewer sees in the video\",\n    \"facialExpression\": \"smile\",\n    \"animation\": \"Talking_0\",\n    \"manimCode\": \"Complete scene with full content (15+ seconds of animation)\"\n  }\n]\n\nFor multi-part explanation (only when content naturally divides):\n[\n  {\n    \"chatResponse\": \"Brief, friendly answer covering the topic (10-50 words)\",\n    \"videoExplanation\": \"Detailed narration for the first part of the video\",\n    \"facialExpression\": \"smile\",\n    \"animation\": \"Talking_0\",\n    \"manimCode\": \"Complete first scene (15+ seconds)\"\n  },\n  {\n    \"chatResponse\": \"\",\n    \"videoExplanation\": \"Detailed narration for the second part of the video\",\n    \"facialExpression\": \"default\",\n    \"animation\": \"Talking_1\",\n    \"manimCode\": \"Complete second scene (15+ seconds)\"\n  }\n]\n\nCONTENT DENSITY REQUIREMENTS:\nEach scene must include enough elements and animations to fill 15+ seconds:\n- Multiple animation steps with proper timing\n- Gradual building of complexity\n- Clear transitions between concepts\n- Sufficient wait times for comprehension\n- Rich visual elements and transformations\n- Well-paced educational content\n\nCRITICAL: Only create multiple parts when content naturally requires different scene types or approaches. Default to comprehensive single videos for most explanations."
               : "You are a wise and patient AI tutor, dedicated to teaching math, science, and coding with clarity, encouragement, and care. Your responses should be concise (10–50 words), clear, and supportive, making complex ideas simple and approachable. Use a warm, guiding tone that inspires curiosity and confidence. Respond only with a valid JSON array containing 1 to 3 message objects. Each message object must have exactly three properties: \"text\" (a string with your response), \"facialExpression\" (one of: smile, sad, surprised, funnyFace, default), and \"animation\" (one of: Talking_0, Talking_1, Talking_2, Laughing, Idle). Always include at least one message that gently invites the learner to share their question, struggle, or interest (e.g., \"Tell me, what would you like to learn today?\"). Choose animations that match the teaching tone: Talking animations for explanations, Laughing for encouragement, Idle for pauses, and Surprised for moments of discovery. If the learner's message is unclear or empty, respond with a single message that kindly asks for clarification."
           },
           {
@@ -414,7 +480,15 @@ app.post("/chat", async (req, res) => {
       console.error("Qwen API call failed:", apiError.message);
       console.error("API Error details:", apiError);
       
-      // Return fallback message for API failures
+      // Check if it's an authentication error
+      if (apiError.status === 401) {
+        console.error("❌ Qwen API Authentication Error - Check NEBIUS_API_KEY in .env file");
+        return res.status(500).send({ 
+          error: "AI service authentication failed. Please check NEBIUS_API_KEY configuration." 
+        });
+      }
+      
+      // Return fallback message for other API failures
       const fallbackMessages = [
         {
           text: "I'm having trouble connecting to my thoughts. Let me try again in a moment!",
@@ -423,8 +497,21 @@ app.post("/chat", async (req, res) => {
         },
       ];
       
-      // Process fallback messages through the audio pipeline
-      await processMessages(fallbackMessages);
+      // Try to process fallback messages, but handle TTS errors gracefully
+      try {
+        await processMessages(fallbackMessages);
+      } catch (processError) {
+        console.error("❌ Fallback message processing failed:", processError.message);
+        if (processError.message.includes("not initialized") || processError.message.includes("credentials")) {
+          console.error("❌ Google Cloud TTS Authentication Error - Check credentials configuration");
+          return res.status(500).send({ 
+            error: "Text-to-speech service authentication failed. Please check Google Cloud TTS credentials configuration." 
+          });
+        }
+        // Return message without audio if TTS fails
+        return res.send({ messages: fallbackMessages });
+      }
+      
       return res.send({ messages: fallbackMessages });
     }
 
@@ -531,13 +618,17 @@ app.post("/chat", async (req, res) => {
     }
 
     // Process messages for audio and lipsync immediately
-    let videoNarrationAudioFiles = null;
+    // For multipart video mode, we need both:
+    // 1. Individual audio files for each video part (to avoid repetition in combined video)
+    // 2. Combined audio file for avatar lipsync (to sync with combined video)
     
+    let combinedVideoNarrationAudio = null;
+    
+    // Generate combined narration audio for avatar lipsync in video mode
     if (videoMode && messages.length > 0) {
-      // For video mode, generate unified narration audio from all video explanations
       const combinedVideoExplanation = messages.map(msg => msg.videoExplanation).join(' ');
-      console.log(`🎵 Generating unified video narration audio...`);
-      videoNarrationAudioFiles = await generateVideoNarrationAudio(combinedVideoExplanation, sessionId);
+      console.log(`🎵 Generating combined video narration audio for avatar sync...`);
+      combinedVideoNarrationAudio = await generateVideoNarrationAudio(combinedVideoExplanation, sessionId);
     }
     
     for (let i = 0; i < messages.length; i++) {
@@ -612,14 +703,22 @@ app.post("/chat", async (req, res) => {
         }
       }
 
-      if (videoMode && videoNarrationAudioFiles) {
-        // For video mode, provide the video's audio URL for direct avatar synchronization
-        console.log(`🎵 Using unified narration audio for avatar sync`);
+      if (videoMode) {
+        // Generate individual narration audio for this video part (for video generation)
+        console.log(`🎵 Generating individual video narration audio for part ${i+1}:`, message.videoExplanation);
+        const partNarrationAudio = await generateVideoNarrationAudio(
+          message.videoExplanation, 
+          `${sessionId}_part${i}`
+        );
         
-        // Don't send base64 audio - instead provide the audio URL for direct access
-        message.audioUrl = `http://localhost:3001/audio/${path.basename(videoNarrationAudioFiles.audioFile)}`;
-        message.lipsync = await readJsonTranscript(videoNarrationAudioFiles.lipsyncFile);
-        message.narrationAudioFile = videoNarrationAudioFiles.audioFile; // For video generation
+        // Store individual audio file for video generation (to avoid repetition)
+        message.narrationAudioFile = partNarrationAudio.audioFile;
+        
+        // For avatar sync, use the combined narration audio (so avatar syncs with combined video)
+        if (combinedVideoNarrationAudio) {
+          message.audioUrl = `http://localhost:3001/audio/${path.basename(combinedVideoNarrationAudio.audioFile)}`;
+          message.lipsync = await readJsonTranscript(combinedVideoNarrationAudio.lipsyncFile);
+        }
         
         // Add flag to indicate this uses video audio (no separate avatar audio)
         message.useVideoAudio = true;

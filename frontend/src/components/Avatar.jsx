@@ -374,7 +374,7 @@ export function Avatar(props) {
   const [facialExpression, setFacialExpression] = useState("");
 
   useFrame(() => {
-    console.log("Setup mode:", setupMode);
+    // Apply facial expressions
     !setupMode &&
       Object.keys(nodes.EyeLeft.morphTargetDictionary).forEach((key) => {
         const mapping = facialExpressions[facialExpression];
@@ -400,15 +400,14 @@ export function Avatar(props) {
       let currentAudioTime = 0;
       let shouldApplyLipSync = false;
       
-      // NEW: Get timing from video sync state if using video audio
+      // VIDEO MODE: Get timing from video sync state if using video audio
       if (videoSyncMode && currentVideoSessionId && message.useVideoAudio) {
         const videoSyncState = getVideoSyncState(currentVideoSessionId);
         if (videoSyncState && videoSyncState.isPlaying) {
           currentAudioTime = videoSyncState.currentTime || 0;
           shouldApplyLipSync = true;
-          console.log("🎬 Video audio time:", currentAudioTime, "Mouth cues:", lipsync.mouthCues?.length);
         } else {
-          // Video not playing - no lip sync
+          // Video paused or stopped - no lip sync
           currentAudioTime = -1;
           shouldApplyLipSync = false;
         }
@@ -417,7 +416,6 @@ export function Avatar(props) {
       else if (audio && !videoSyncMode) {
         currentAudioTime = audio.currentTime;
         shouldApplyLipSync = !audio.paused && !audio.ended;
-        console.log("💬 Chat audio time:", currentAudioTime, "Paused:", audio.paused, "Ended:", audio.ended, "Mouth cues:", lipsync.mouthCues?.length);
       }
       
       // Apply lip-sync based on current time
@@ -429,17 +427,15 @@ export function Avatar(props) {
             currentAudioTime <= mouthCue.end
           ) {
             const viseme = corresponding[mouthCue.value];
-            console.log("👄 Applying viseme:", viseme, "at time:", currentAudioTime, "for cue:", mouthCue.value);
             appliedMorphTargets.push(viseme);
             lerpMorphTarget(viseme, 1, 0.2);
             break;
           }
         }
-      } else if (!shouldApplyLipSync) {
-        console.log("🔇 Lip-sync disabled - audio not playing");
       }
     }
 
+    // Reset unused visemes
     Object.values(corresponding).forEach((value) => {
       if (appliedMorphTargets.includes(value)) {
         return;

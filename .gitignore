@@ -10,3 +10,6 @@ backend/node_modules/
 worker/debug/
 backend/audios/
 uploads/videos/
+
+gen-lang-client-0984354674-ea557af59d84.json
+backend/.env
