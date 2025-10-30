@@ -462,6 +462,10 @@ async def generate_video(request: ManimRequest):
             f.write(manim_code)
 
         print(f"📄 Script written to: {script_file}")
+        print(f"🔍 First 10 lines of generated script:")
+        lines = manim_code.split('\n')
+        for i, line in enumerate(lines[:10]):
+            print(f"   {i+1}: {line}")
         print(f"🎬 [DEBUG] Final script content being written:\n{manim_code}")
 
         progress_tracker[request_id] = f"Rendering {scene_class} with Manim..."

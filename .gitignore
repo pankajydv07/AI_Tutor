@@ -8,4 +8,5 @@ node_modules/
 *.avi
 backend/node_modules/
 worker/debug/
+backend/audios/
 uploads/videos/
