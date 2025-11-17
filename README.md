@@ -1,7 +1,7 @@
 
 ---
 
-# 🌟 **SOLVEIT AI – Interactive AI Tutor (AI + Manim + Avatar)**
+# 🌟 **AI TUTOR – Interactive AI Tutor (AI + Manim + Avatar)**
 
 *Real-time animated video explanations with AI reasoning, Manim visuals, multilingual narration, and AI tutor avatars.*
 
